@@ -357,6 +357,9 @@ impl ApplicationHandler<Event> for Processor {
                     error!("Could not open window: {:?}", err);
                 }
             },
+            (EventType::CreateTab, _) => {
+                // somehow create new window context using same window
+            },
             // Process events affecting all windows.
             (payload, None) => {
                 let event = WinitEvent::UserEvent(Event::new(payload, None));
@@ -511,6 +514,7 @@ pub enum EventType {
     Message(Message),
     Scroll(Scroll),
     CreateWindow(WindowOptions),
+    CreateTab,
     #[cfg(unix)]
     IpcConfig(IpcConfig),
     BlinkCursor,
@@ -860,6 +864,13 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         let _ = self
             .event_proxy
             .send_event(Event::new(EventType::CreateWindow(WindowOptions::default()), None));
+    }
+
+    fn create_new_tab(&mut self) {
+        let _ = self.event_proxy.send_event(Event::new(
+            EventType::CreateTab,
+            None,
+        ));
     }
 
     fn spawn_daemon<I, S>(&self, program: &str, args: I)
@@ -1794,6 +1805,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                 EventType::Message(_)
                 | EventType::ConfigReload(_)
                 | EventType::CreateWindow(_)
+                | EventType::CreateTab
                 | EventType::Frame => (),
             },
             WinitEvent::WindowEvent { event, .. } => {

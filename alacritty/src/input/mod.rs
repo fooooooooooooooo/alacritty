@@ -101,6 +101,7 @@ pub trait ActionContext<T: EventListener> {
     fn create_new_window(&mut self, _tabbing_id: Option<String>) {}
     #[cfg(not(target_os = "macos"))]
     fn create_new_window(&mut self) {}
+    fn create_new_tab(&mut self) {}
     fn change_font_size(&mut self, _delta: f32) {}
     fn reset_font_size(&mut self) {}
     fn pop_message(&mut self) {}
@@ -421,6 +422,46 @@ impl<T: EventListener> Execute<T> for Action {
             Action::SelectTab9 => ctx.window().select_tab_at_index(8),
             #[cfg(target_os = "macos")]
             Action::SelectLastTab => ctx.window().select_last_tab(),
+            Action::CreateNewTab => {
+                ctx.create_new_tab();
+                println!("CreateNewTab")
+            },
+            Action::SelectNextTab => {
+                println!("SelectNextTab")
+            },
+            Action::SelectPreviousTab => {
+                println!("SelectPreviousTab")
+            },
+            Action::SelectTab1 => {
+                println!("SelectTab1")
+            },
+            Action::SelectTab2 => {
+                println!("SelectTab2")
+            },
+            Action::SelectTab3 => {
+                println!("SelectTab3")
+            },
+            Action::SelectTab4 => {
+                println!("SelectTab4")
+            },
+            Action::SelectTab5 => {
+                println!("SelectTab5")
+            },
+            Action::SelectTab6 => {
+                println!("SelectTab6")
+            },
+            Action::SelectTab7 => {
+                println!("SelectTab7")
+            },
+            Action::SelectTab8 => {
+                println!("SelectTab8")
+            },
+            Action::SelectTab9 => {
+                println!("SelectTab9")
+            },
+            Action::SelectLastTab => {
+                println!("SelectLastTab")
+            },
             _ => (),
         }
     }

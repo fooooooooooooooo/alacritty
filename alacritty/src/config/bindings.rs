@@ -523,6 +523,21 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         ArrowDown,                          +BindingMode::SEARCH; SearchAction::SearchHistoryNext;
         Enter,                              +BindingMode::SEARCH, ~BindingMode::VI; SearchAction::SearchFocusNext;
         Enter, ModifiersState::SHIFT,       +BindingMode::SEARCH, ~BindingMode::VI; SearchAction::SearchFocusPrevious;
+        // Tabs
+        "t",    ModifiersState::CONTROL;                         Action::CreateNewTab;
+        "]",    ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectNextTab;
+        "[",    ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectPreviousTab;
+        Tab,    ModifiersState::CONTROL;                         Action::SelectNextTab;
+        Tab,    ModifiersState::CONTROL | ModifiersState::SHIFT; Action::SelectPreviousTab;
+        "1",    ModifiersState::CONTROL;                         Action::SelectTab1;
+        "2",    ModifiersState::CONTROL;                         Action::SelectTab2;
+        "3",    ModifiersState::CONTROL;                         Action::SelectTab3;
+        "4",    ModifiersState::CONTROL;                         Action::SelectTab4;
+        "5",    ModifiersState::CONTROL;                         Action::SelectTab5;
+        "6",    ModifiersState::CONTROL;                         Action::SelectTab6;
+        "7",    ModifiersState::CONTROL;                         Action::SelectTab7;
+        "8",    ModifiersState::CONTROL;                         Action::SelectTab8;
+        "9",    ModifiersState::CONTROL;                         Action::SelectLastTab;
     );
 
     bindings.extend(platform_key_bindings());
