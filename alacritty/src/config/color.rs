@@ -32,18 +32,6 @@ impl Colors {
     pub fn footer_bar_background(&self) -> Rgb {
         self.footer_bar.background.unwrap_or(self.primary.foreground)
     }
-
-    pub fn tab_bar_foreground(&self) -> Rgb {
-        self.tab_bar.foreground.unwrap_or(self.primary.background)
-    }
-
-    pub fn tab_bar_background(&self) -> Rgb {
-        self.tab_bar.background.unwrap_or(self.primary.foreground)
-    }
-
-    pub fn tab_bar_active(&self) -> Rgb {
-        self.tab_bar.active.unwrap_or(self.primary.background)
-    }
 }
 
 #[derive(ConfigDeserialize, Copy, Clone, Default, Debug, PartialEq, Eq)]
@@ -180,14 +168,27 @@ pub struct BarColors {
     background: Option<Rgb>,
 }
 
-#[derive(ConfigDeserialize, Debug, Copy, Clone, Default, PartialEq, Eq)]
+#[derive(ConfigDeserialize, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct TabBarColors {
     /// Tab bar background color
-    pub background: Option<Rgb>,
+    pub background: Rgb,
     /// Tab bar foreground color
-    pub foreground: Option<Rgb>,
+    pub foreground: Rgb,
     /// Active tab background color
-    pub active: Option<Rgb>,
+    pub active_background: Rgb,
+    /// Active tab foreground color
+    pub active_foreground: Rgb,
+}
+
+impl Default for TabBarColors {
+    fn default() -> Self {
+        Self {
+            background: Rgb::new(0x1d, 0x1d, 0x1f),
+            foreground: Rgb::new(0xff, 0xff, 0xff),
+            active_background: Rgb::new(0x28, 0x29, 0x2c),
+            active_foreground: Rgb::new(0xff, 0xff, 0xff),
+        }
+    }
 }
 
 #[derive(ConfigDeserialize, Clone, Debug, PartialEq, Eq)]

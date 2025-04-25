@@ -793,44 +793,58 @@ impl Display {
     #[inline(never)]
     fn draw_tab_bar(&mut self, config: &UiConfig) {
         if !self.tab_info.should_draw() {
-            println!("No tab bar to draw: {}", self.tab_info.tab_count);
             return;
         }
 
         let size_info = self.size_info;
-        let fg = config.colors.tab_bar_foreground();
-        let bg = config.colors.tab_bar_background();
-        let active_bg = config.colors.tab_bar_active();
 
-        // Reserve top line for tab bar
         let tab_height = size_info.cell_height();
-        let tab_width = size_info.width() as usize / self.tab_info.tab_count;
-        let mut x = 0;
+        let tab_width = size_info.width() / (self.tab_info.tab_count - 1) as f32;
+        let mut x = 0.0;
+        // draw at bottom of the screen
+        let y = size_info.screen_lines() as f32 * size_info.cell_height() - size_info.padding_y();
 
         // Draw tab bar background first
-        let bar_rect = RenderRect::new(0.0, 0.0, size_info.width(), tab_height, bg, 1.0);
+        let bar_rect = RenderRect::new(
+            0.0,
+            y,
+            size_info.width(),
+            tab_height,
+            config.colors.tab_bar.background,
+            1.0,
+        );
 
         self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![bar_rect]);
 
         for tab_idx in 0..self.tab_info.tab_count {
             let is_active = tab_idx == self.tab_info.active_index;
 
+            let fg = if is_active {
+                config.colors.tab_bar.active_foreground
+            } else {
+                config.colors.tab_bar.foreground
+            };
+
+            let bg = if is_active {
+                config.colors.tab_bar.active_background
+            } else {
+                config.colors.tab_bar.background
+            };
+
             // Draw active tab background
             if is_active {
-                let tab_rect =
-                    RenderRect::new(x as f32, 0.0, tab_width as f32, tab_height, active_bg, 1.0);
-
-                self.renderer
-                    .draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![tab_rect]);
+                let rect = RenderRect::new(x, y, tab_width, tab_height, bg, 1.0);
+                self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![rect]);
             }
 
             // Draw tab number
-            let tab_text = format!(" {}", tab_idx + 1);
-            let point = Point::new(0, Column(x / size_info.cell_width() as usize));
+            let tab_text = (tab_idx + 1).to_string();
+            let point =
+                Point::new(size_info.total_lines(), Column((x / size_info.cell_width()) as usize));
             self.renderer.draw_string(
                 point,
                 fg,
-                if is_active { active_bg } else { bg },
+                bg,
                 tab_text.chars(),
                 &size_info,
                 &mut self.glyph_cache,
@@ -838,18 +852,6 @@ impl Display {
 
             x += tab_width;
         }
-
-        // Draw separator line below tabs
-        let separator_rect =
-            RenderRect::new(0.0, tab_height - 1.0, size_info.width(), 1.0, fg, 0.5);
-
-        self.renderer
-            .draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![separator_rect]);
-
-        // Reserve space for tab bar
-        let mut new_size = self.size_info;
-        new_size.reserve_lines(1);
-        // self.size_info = new_size;
     }
 
     /// Draw the screen.
@@ -865,8 +867,6 @@ impl Display {
         config: &UiConfig,
         search_state: &mut SearchState,
     ) {
-        self.draw_tab_bar(config);
-
         // Collect renderable content before the terminal is dropped.
         let mut content = RenderableContent::new(config, self, &terminal, search_state);
         let mut grid_cells = Vec::new();
@@ -1096,6 +1096,8 @@ impl Display {
         }
 
         self.draw_render_timer(config);
+
+        self.draw_tab_bar(config);
 
         // Draw hyperlink uri preview.
         if has_highlighted_hint {
