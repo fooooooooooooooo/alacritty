@@ -33,7 +33,7 @@ use crate::cli::{ParsedOptions, WindowOptions};
 use crate::clipboard::Clipboard;
 use crate::config::UiConfig;
 use crate::display::window::Window;
-use crate::display::Display;
+use crate::display::{Display, TabInfo};
 use crate::event::{
     ActionContext, Event, EventProxy, InlineSearchState, Mouse, SearchState, TouchPurpose,
 };
@@ -43,26 +43,32 @@ use crate::message_bar::MessageBuffer;
 use crate::scheduler::Scheduler;
 use crate::{input, renderer};
 
+/// A terminal tab containing a terminal instance and its associated state
+struct TerminalTab {
+    terminal: Arc<FairMutex<Term<EventProxy>>>,
+    notifier: Notifier,
+    #[cfg(not(windows))]
+    master_fd: RawFd,
+    #[cfg(not(windows))]
+    shell_pid: u32,
+}
+
 /// Event context for one individual Alacritty window.
 pub struct WindowContext {
     pub message_buffer: MessageBuffer,
     pub display: Display,
     pub dirty: bool,
     event_queue: Vec<WinitEvent<Event>>,
-    terminal: Arc<FairMutex<Term<EventProxy>>>,
+    tabs: Vec<TerminalTab>,
+    active_tab_index: usize,
     cursor_blink_timed_out: bool,
     modifiers: Modifiers,
     inline_search_state: InlineSearchState,
     search_state: SearchState,
-    notifier: Notifier,
     mouse: Mouse,
     touch: TouchPurpose,
     occluded: bool,
     preserve_title: bool,
-    #[cfg(not(windows))]
-    master_fd: RawFd,
-    #[cfg(not(windows))]
-    shell_pid: u32,
     window_config: ParsedOptions,
     config: Rc<UiConfig>,
 }
@@ -231,14 +237,17 @@ impl WindowContext {
         // Create context for the Alacritty window.
         Ok(WindowContext {
             preserve_title,
-            terminal,
+            tabs: vec![TerminalTab {
+                terminal,
+                notifier: Notifier(loop_tx),
+                #[cfg(not(windows))]
+                master_fd,
+                #[cfg(not(windows))]
+                shell_pid,
+            }],
+            active_tab_index: 0,
             display,
-            #[cfg(not(windows))]
-            master_fd,
-            #[cfg(not(windows))]
-            shell_pid,
             config,
-            notifier: Notifier(loop_tx),
             cursor_blink_timed_out: Default::default(),
             inline_search_state: Default::default(),
             message_buffer: Default::default(),
@@ -261,7 +270,7 @@ impl WindowContext {
         self.config = self.window_config.override_config_rc(self.config.clone());
 
         self.display.update_config(&self.config);
-        self.terminal.lock().set_options(self.config.term_options());
+        self.tabs[self.active_tab_index].terminal.lock().set_options(self.config.term_options());
 
         // Reload cursor if its thickness has changed.
         if (old_config.cursor.thickness() - self.config.cursor.thickness()).abs() > f32::EPSILON {
@@ -377,7 +386,7 @@ impl WindowContext {
         }
 
         // Redraw the window.
-        let terminal = self.terminal.lock();
+        let terminal = self.tabs[self.active_tab_index].terminal.lock();
         self.display.draw(
             terminal,
             scheduler,
@@ -412,7 +421,9 @@ impl WindowContext {
             },
         }
 
-        let mut terminal = self.terminal.lock();
+        let tab = &mut self.tabs[self.active_tab_index];
+
+        let mut terminal = tab.terminal.lock();
 
         let old_is_searching = self.search_state.history_index.is_some();
 
@@ -422,7 +433,7 @@ impl WindowContext {
             inline_search_state: &mut self.inline_search_state,
             search_state: &mut self.search_state,
             modifiers: &mut self.modifiers,
-            notifier: &mut self.notifier,
+            notifier: &mut tab.notifier,
             display: &mut self.display,
             mouse: &mut self.mouse,
             touch: &mut self.touch,
@@ -430,9 +441,9 @@ impl WindowContext {
             occluded: &mut self.occluded,
             terminal: &mut terminal,
             #[cfg(not(windows))]
-            master_fd: self.master_fd,
+            master_fd: tab.master_fd,
             #[cfg(not(windows))]
-            shell_pid: self.shell_pid,
+            shell_pid: tab.shell_pid,
             preserve_title: self.preserve_title,
             config: &self.config,
             event_proxy,
@@ -452,7 +463,7 @@ impl WindowContext {
             Self::submit_display_update(
                 &mut terminal,
                 &mut self.display,
-                &mut self.notifier,
+                &mut tab.notifier,
                 &self.message_buffer,
                 &mut self.search_state,
                 old_is_searching,
@@ -490,7 +501,7 @@ impl WindowContext {
     /// Write the ref test results to the disk.
     pub fn write_ref_test_results(&self) {
         // Dump grid state.
-        let mut grid = self.terminal.lock().grid().clone();
+        let mut grid = self.tabs[self.active_tab_index].terminal.lock().grid().clone();
         grid.initialize_all();
         grid.truncate();
 
@@ -547,11 +558,97 @@ impl WindowContext {
             }
         }
     }
+
+    /// Create a new terminal tab
+    pub fn create_new_tab(
+        &mut self,
+        event_loop_proxy: &EventLoopProxy<Event>,
+    ) -> Result<(), Box<dyn Error>> {
+        let event_proxy = EventProxy::new(event_loop_proxy.clone(), self.display.window.id());
+
+        // Create a new terminal instance
+        let terminal = Term::new(
+            self.config.term_options(),
+            &self.display.size_info,
+            event_proxy.clone(),
+        );
+
+        // Create PTY for the new terminal
+        let pty_config = self.config.pty_config();
+        let pty = tty::new(&pty_config, self.display.size_info.into(), self.display.window.id().into())?;
+
+        let terminal = Arc::new(FairMutex::new(terminal));
+
+        // Create event loop
+        let event_loop = PtyEventLoop::new(
+            Arc::clone(&terminal),
+            event_proxy,
+            pty,
+            false, // Don't drain on exit for tabs
+            self.config.debug.ref_test,
+        )?;
+
+        let loop_tx = event_loop.channel();
+        let _io_thread = event_loop.spawn();
+
+        // Add the new tab
+        self.tabs.push(TerminalTab {
+            terminal,
+            notifier: Notifier(loop_tx),
+            #[cfg(not(windows))]
+            master_fd: pty.master_fd(),
+            #[cfg(not(windows))]
+            shell_pid: pty.child_pid(),
+        });
+
+        // Switch to the new tab
+        self.active_tab_index = self.tabs.len() - 1;
+
+        // Update tab info
+        self.display.tab_info =
+            Some(TabInfo { active_index: self.active_tab_index, tab_count: self.tabs.len() });
+
+        self.display.pending_update.dirty = true;
+        self.dirty = true;
+
+        Ok(())
+    }
+
+    /// Switch to a specific tab by index
+    pub fn switch_to_tab(&mut self, index: usize) {
+        if index < self.tabs.len() && index != self.active_tab_index {
+            self.active_tab_index = index;
+            self.display.pending_update.dirty = true;
+            self.dirty = true;
+        }
+    }
+
+    /// Switch to the next tab
+    pub fn switch_to_next_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
+            self.display.pending_update.dirty = true;
+            self.dirty = true;
+        }
+    }
+
+    /// Switch to the previous tab
+    pub fn switch_to_previous_tab(&mut self) {
+        if !self.tabs.is_empty() {
+            self.active_tab_index = if self.active_tab_index == 0 {
+                self.tabs.len() - 1
+            } else {
+                self.active_tab_index - 1
+            };
+            self.display.pending_update.dirty = true;
+            self.dirty = true;
+        }
+    }
 }
 
 impl Drop for WindowContext {
     fn drop(&mut self) {
         // Shutdown the terminal's PTY.
-        let _ = self.notifier.0.send(Msg::Shutdown);
+        let _ = self.tabs[self.active_tab_index].notifier.0.send(Msg::Shutdown);
     }
 }

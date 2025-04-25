@@ -20,7 +20,8 @@ pub struct Colors {
     pub hints: HintColors,
     pub transparent_background_colors: bool,
     pub draw_bold_text_with_bright_colors: bool,
-    footer_bar: BarColors,
+    pub footer_bar: BarColors,
+    pub tab_bar: TabBarColors,
 }
 
 impl Colors {
@@ -165,6 +166,13 @@ impl Default for MatchColors {
 pub struct BarColors {
     foreground: Option<Rgb>,
     background: Option<Rgb>,
+}
+
+#[derive(ConfigDeserialize, Debug, Copy, Clone, Default, PartialEq, Eq)]
+pub struct TabBarColors {
+    pub foreground: Option<Rgb>,
+    pub background: Option<Rgb>,
+    pub active: Option<Rgb>,
 }
 
 #[derive(ConfigDeserialize, Clone, Debug, PartialEq, Eq)]

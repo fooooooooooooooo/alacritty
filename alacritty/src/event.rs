@@ -357,8 +357,27 @@ impl ApplicationHandler<Event> for Processor {
                     error!("Could not open window: {:?}", err);
                 }
             },
-            (EventType::CreateTab, _) => {
-                // somehow create new window context using same window
+            (EventType::CreateTab(proxy), window_id) => {
+                if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
+                    if let Err(err) = window_context.create_new_tab(&proxy) {
+                        error!("Could not open tab: {:?}", err);
+                    }
+                }
+            },
+            (EventType::SelectNextTab, window_id) => {
+                if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
+                    window_context.switch_to_next_tab();
+                }
+            },
+            (EventType::SelectPreviousTab, window_id) => {
+                if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
+                    window_context.switch_to_previous_tab();
+                }
+            },
+            (EventType::SelectTab(index), window_id) => {
+                if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
+                    window_context.switch_to_tab(index);
+                }
             },
             // Process events affecting all windows.
             (payload, None) => {
@@ -514,7 +533,10 @@ pub enum EventType {
     Message(Message),
     Scroll(Scroll),
     CreateWindow(WindowOptions),
-    CreateTab,
+    CreateTab(EventLoopProxy<Event>),
+    SelectNextTab,
+    SelectPreviousTab,
+    SelectTab(usize),
     #[cfg(unix)]
     IpcConfig(IpcConfig),
     BlinkCursor,
@@ -684,7 +706,7 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         let vi_mode = self.terminal.mode().contains(TermMode::VI);
 
         // Update selection.
-        if vi_mode && self.terminal.selection.as_ref().map_or(false, |s| !s.is_empty()) {
+        if vi_mode && self.terminal.selection.as_ref().is_some_and(|s| !s.is_empty()) {
             self.update_selection(self.terminal.vi_mode_cursor.point, Side::Right);
         } else if self.mouse.left_button_state == ElementState::Pressed
             || self.mouse.right_button_state == ElementState::Pressed
@@ -725,7 +747,7 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
         // Clear the selection on the terminal.
         let selection = self.terminal.selection.take();
         // Mark the terminal as dirty when selection wasn't empty.
-        *self.dirty |= selection.map_or(false, |s| !s.is_empty());
+        *self.dirty |= selection.is_some_and(|s| !s.is_empty());
     }
 
     fn update_selection(&mut self, mut point: Point, side: Side) {
@@ -866,11 +888,36 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
             .send_event(Event::new(EventType::CreateWindow(WindowOptions::default()), None));
     }
 
+    // create new tab
     fn create_new_tab(&mut self) {
+        println!("create new tab");
         let _ = self.event_proxy.send_event(Event::new(
-            EventType::CreateTab,
-            None,
+            EventType::CreateTab(self.event_proxy.clone()),
+            self.window().id(),
         ));
+    }
+
+    // select next tab
+    fn select_next_tab(&mut self) {
+        println!("select next tab");
+        let _ =
+            self.event_proxy.send_event(Event::new(EventType::SelectNextTab, self.window().id()));
+    }
+
+    // select previous tab
+    fn select_previous_tab(&mut self) {
+        println!("select previous tab");
+        let _ = self
+            .event_proxy
+            .send_event(Event::new(EventType::SelectPreviousTab, self.window().id()));
+    }
+
+    // select tab
+    fn select_tab(&mut self, index: usize) {
+        println!("select tab {}", index);
+        let _ = self
+            .event_proxy
+            .send_event(Event::new(EventType::SelectTab(index), self.window().id()));
     }
 
     fn spawn_daemon<I, S>(&self, program: &str, args: I)
@@ -1805,7 +1852,10 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                 EventType::Message(_)
                 | EventType::ConfigReload(_)
                 | EventType::CreateWindow(_)
-                | EventType::CreateTab
+                | EventType::CreateTab(_)
+                | EventType::SelectNextTab
+                | EventType::SelectPreviousTab
+                | EventType::SelectTab(_)
                 | EventType::Frame => (),
             },
             WinitEvent::WindowEvent { event, .. } => {
