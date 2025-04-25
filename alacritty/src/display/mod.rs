@@ -339,12 +339,18 @@ impl DisplayUpdate {
 }
 
 /// Tab information for rendering tab bar
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TabInfo {
     /// Index of the currently active tab
     pub active_index: usize,
     /// Total number of tabs
     pub tab_count: usize,
+}
+
+impl TabInfo {
+    pub fn should_draw(&self) -> bool {
+        self.tab_count > 1
+    }
 }
 
 /// The display wraps a window, font rasterizer, and GPU renderer.
@@ -407,7 +413,7 @@ pub struct Display {
     glyph_cache: GlyphCache,
     meter: Meter,
 
-    pub tab_info: Option<TabInfo>,
+    pub tab_info: TabInfo,
 }
 
 impl Display {
@@ -506,7 +512,7 @@ impl Display {
 
         #[allow(clippy::single_match)]
         #[cfg(not(windows))]
-        if (!_tabbed) {
+        if (!tabbed) {
             match config.window.startup_mode {
                 #[cfg(target_os = "macos")]
                 StartupMode::SimpleFullscreen => window.set_simple_fullscreen(true),
@@ -711,6 +717,10 @@ impl Display {
             config.window.dynamic_padding,
         );
 
+        if self.tab_info.should_draw() {
+            new_size.screen_lines -= 1;
+        }
+
         // Update number of column/lines in the viewport.
         let search_active = search_state.history_index.is_some();
         let message_bar_lines = message_buffer.message().map_or(0, |m| m.text(&new_size).len());
@@ -723,7 +733,7 @@ impl Display {
         }
 
         // Resize when terminal when its dimensions have changed.
-        if self.size_info.screen_lines() != new_size.screen_lines
+        if self.size_info.screen_lines() != new_size.screen_lines()
             || self.size_info.columns() != new_size.columns()
         {
             // Resize PTY.
@@ -782,59 +792,64 @@ impl Display {
     /// Draw the tab bar
     #[inline(never)]
     fn draw_tab_bar(&mut self, config: &UiConfig) {
-        if let Some(tab_info) = &self.tab_info {
-            let num_tabs = tab_info.tab_count;
-            if num_tabs <= 1 {
-                return;
-            }
-
-            let size_info = self.size_info;
-            let fg = config.colors.tab_bar.foreground.unwrap_or(config.colors.primary.background);
-            let bg = config.colors.tab_bar.background.unwrap_or(config.colors.primary.foreground);
-            let active_bg = config.colors.tab_bar.active.unwrap_or(config.colors.primary.background);
-
-            // Reserve top line for tab bar
-            let tab_width = size_info.width() as usize / num_tabs;
-            let mut x = 0;
-
-            for tab_idx in 0..num_tabs {
-                let tab_bg = if tab_idx == tab_info.active_index { active_bg } else { bg };
-                let tab_rect = RenderRect::new(
-                    x as f32,
-                    0.0,
-                    tab_width as f32,
-                    size_info.cell_height(),
-                    tab_bg,
-                    1.0,
-                );
-
-                // Draw tab background
-                self.renderer.draw_rects(
-                    &size_info,
-                    &self.glyph_cache.font_metrics(),
-                    vec![tab_rect],
-                );
-
-                // Draw tab number
-                let tab_text = format!(" {}", tab_idx + 1);
-                let point = Point::new(0, Column(x / size_info.cell_width() as usize));
-                self.renderer.draw_string(
-                    point,
-                    fg,
-                    tab_bg,
-                    tab_text.chars(),
-                    &size_info,
-                    &mut self.glyph_cache,
-                );
-
-                x += tab_width;
-            }
-
-            // Reserve space for tab bar
-            let mut new_size = self.size_info;
-            new_size.reserve_lines(1);
-            self.size_info = new_size;
+        if !self.tab_info.should_draw() {
+            println!("No tab bar to draw: {}", self.tab_info.tab_count);
+            return;
         }
+
+        let size_info = self.size_info;
+        let fg = config.colors.tab_bar_foreground();
+        let bg = config.colors.tab_bar_background();
+        let active_bg = config.colors.tab_bar_active();
+
+        // Reserve top line for tab bar
+        let tab_height = size_info.cell_height();
+        let tab_width = size_info.width() as usize / self.tab_info.tab_count;
+        let mut x = 0;
+
+        // Draw tab bar background first
+        let bar_rect = RenderRect::new(0.0, 0.0, size_info.width(), tab_height, bg, 1.0);
+
+        self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![bar_rect]);
+
+        for tab_idx in 0..self.tab_info.tab_count {
+            let is_active = tab_idx == self.tab_info.active_index;
+
+            // Draw active tab background
+            if is_active {
+                let tab_rect =
+                    RenderRect::new(x as f32, 0.0, tab_width as f32, tab_height, active_bg, 1.0);
+
+                self.renderer
+                    .draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![tab_rect]);
+            }
+
+            // Draw tab number
+            let tab_text = format!(" {}", tab_idx + 1);
+            let point = Point::new(0, Column(x / size_info.cell_width() as usize));
+            self.renderer.draw_string(
+                point,
+                fg,
+                if is_active { active_bg } else { bg },
+                tab_text.chars(),
+                &size_info,
+                &mut self.glyph_cache,
+            );
+
+            x += tab_width;
+        }
+
+        // Draw separator line below tabs
+        let separator_rect =
+            RenderRect::new(0.0, tab_height - 1.0, size_info.width(), 1.0, fg, 0.5);
+
+        self.renderer
+            .draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![separator_rect]);
+
+        // Reserve space for tab bar
+        let mut new_size = self.size_info;
+        new_size.reserve_lines(1);
+        // self.size_info = new_size;
     }
 
     /// Draw the screen.
@@ -850,7 +865,6 @@ impl Display {
         config: &UiConfig,
         search_state: &mut SearchState,
     ) {
-        // First draw tab bar if needed
         self.draw_tab_bar(config);
 
         // Collect renderable content before the terminal is dropped.

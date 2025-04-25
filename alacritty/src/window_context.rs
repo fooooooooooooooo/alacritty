@@ -33,7 +33,7 @@ use crate::cli::{ParsedOptions, WindowOptions};
 use crate::clipboard::Clipboard;
 use crate::config::UiConfig;
 use crate::display::window::Window;
-use crate::display::{Display, TabInfo};
+use crate::display::Display;
 use crate::event::{
     ActionContext, Event, EventProxy, InlineSearchState, Mouse, SearchState, TouchPurpose,
 };
@@ -567,15 +567,13 @@ impl WindowContext {
         let event_proxy = EventProxy::new(event_loop_proxy.clone(), self.display.window.id());
 
         // Create a new terminal instance
-        let terminal = Term::new(
-            self.config.term_options(),
-            &self.display.size_info,
-            event_proxy.clone(),
-        );
+        let terminal =
+            Term::new(self.config.term_options(), &self.display.size_info, event_proxy.clone());
 
         // Create PTY for the new terminal
         let pty_config = self.config.pty_config();
-        let pty = tty::new(&pty_config, self.display.size_info.into(), self.display.window.id().into())?;
+        let pty =
+            tty::new(&pty_config, self.display.size_info.into(), self.display.window.id().into())?;
 
         let terminal = Arc::new(FairMutex::new(terminal));
 
@@ -605,8 +603,8 @@ impl WindowContext {
         self.active_tab_index = self.tabs.len() - 1;
 
         // Update tab info
-        self.display.tab_info =
-            Some(TabInfo { active_index: self.active_tab_index, tab_count: self.tabs.len() });
+        self.display.tab_info.active_index = self.active_tab_index;
+        self.display.tab_info.tab_count = self.tabs.len();
 
         self.display.pending_update.dirty = true;
         self.dirty = true;
@@ -619,6 +617,7 @@ impl WindowContext {
         if index < self.tabs.len() && index != self.active_tab_index {
             self.active_tab_index = index;
             self.display.pending_update.dirty = true;
+            self.display.tab_info.active_index = index;
             self.dirty = true;
         }
     }
@@ -627,6 +626,7 @@ impl WindowContext {
     pub fn switch_to_next_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
+            self.display.tab_info.active_index = self.active_tab_index;
             self.display.pending_update.dirty = true;
             self.dirty = true;
         }
@@ -640,6 +640,7 @@ impl WindowContext {
             } else {
                 self.active_tab_index - 1
             };
+            self.display.tab_info.active_index = self.active_tab_index;
             self.display.pending_update.dirty = true;
             self.dirty = true;
         }
