@@ -1,14 +1,14 @@
 [package]
 name = "alacritty_terminal"
-version = "0.25.1-dev"
+version = "0.26.1-dev"
 authors = ["Christian Duerr <contact@christianduerr.com>", "Joe Wilm <joe@jwilm.com>"]
 license = "Apache-2.0"
 description = "Library for writing terminal emulators"
 readme = "../README.md"
 homepage = "https://alacritty.org"
 repository = "https://github.com/alacritty/alacritty"
-edition = "2021"
-rust-version = "1.74.0"
+edition.workspace = true
+rust-version.workspace = true
 
 [features]
 default = ["serde"]
@@ -21,15 +21,16 @@ home = "0.5.5"
 libc = "0.2"
 log = "0.4"
 parking_lot = "0.12.0"
-polling = "3.0.0"
+polling = "3.8.0"
 regex-automata = "0.4.3"
-unicode-width = "0.1"
+unicode-width = "0.2.0"
 vte = { version = "0.15.0", default-features = false, features = ["std", "ansi"] }
 serde = { version = "1", features = ["derive", "rc"], optional = true }
 
 [target.'cfg(unix)'.dependencies]
-rustix-openpty = "0.1.1"
-signal-hook = "0.3.10"
+rustix-openpty = "0.2.0"
+rustix = { version = "1.0.0", default-features = false, features = ["std"] }
+signal-hook = "0.4.3"
 
 [target.'cfg(windows)'.dependencies]
 piper = "0.2.1"

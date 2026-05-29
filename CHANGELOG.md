@@ -8,17 +8,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 Notable changes to the `alacritty_terminal` crate are documented in its
 [CHANGELOG](./alacritty_terminal/CHANGELOG.md).
 
-## 0.16.0-dev
+## 0.18.0-dev
+
+### Packaging
+
+- Fixed `alacritty-escapes(7)` manpage missing from macOS install
+
+### Fixed
+
+- Spurious "Failed to set new owner of XCB selection" warnings on X11
+- Lacking permissions to launch software sending Apple events
+
+## 0.17.0
+
+### Packaging
+
+- Fixed invalid logo SVG attributes
+- New `alacritty-escapes(7)` manpage
+- Removed broken flash capability from terminfo
+
+### Added
+
+- Ability to bind `WheelUp` and `WheelDown` in `mouse.bindings`
+- Support TOML 1.1 syntax
+- `window.resize_increments` support on Wayland
+
+### Changed
+
+- Don't highlight hints on hover when the mouse cursor is hidden
+- IME is disabled in Vi mode on X11
+- Require explicit tap to enable IME with touch input
+- Use built-in font for block elements symbols from `U+1FB82` to `U+1FB8B`
+
+### Fixed
+
+- Brief error popup when saving the config file with some editors
+- Subprocesses on OpenBSD now run with their CWD set to that of the shell's foreground process.
+- Crash when OpenGL context resets
+- Crash when committing text with some IMEs on macOS
+- Signal termination skipping resource cleanup
+
+## 0.16.1
+
+### Fixed
+
+- Crashes on GPUs with partial robustness support
+
+## 0.16.0
+
+### Packaging
+
+- Minimum Rust version has been bumped to 1.85.0
+
+### Added
+
+- Vi motions `*`, `#`, `{`, and `}`
+- IPC config retrieval using `alacritty msg get-config`
+- Multi-sequence touch zoom sequences
+- Vi action `Y` keybind, yank to the end of line
+- Add `/etc/alacritty/alacritty.toml` fallback for system wide configuration
+- Unicode 17 support
 
 ### Changed
 
 - Hide login message if `~/.hushlogin` is present
+- Improve rendering of rounded corners with builtin box drawing
 
 ### Fixed
 
 - Crash when OpenGL context resets
 - Modifier keys clearing selection with kitty keyboard protocol enabled
 - `glyph_offset.y` not applied to strikeout
+- `Enter`,`Tab`, `Backspace` not disambiguated with `shift` in kitty keyboard's disambiguate mode
+- Hint bindings not respecting IPC overrides
+- Search matching a wrapping fullwidth character in the last column
+- Crash when `AppleFontSmoothing` option is not present on macOS
+- Origin mode (DECOM) not moving cursor to the origin point
+- Unresponsiveness when spamming the bell character with a bell command enabled
+- `window.startup_mode` applied to existing window when opening a new tab on macOS
+- Slowdowns over time on macOS 26
 
 ## 0.15.1
 

@@ -1,10 +1,11 @@
 //! TTY related functionality.
 
-use std::ffi::CStr;
+use std::ffi::{CStr, CString};
 use std::fs::File;
 use std::io::{Error, ErrorKind, Read, Result};
 use std::mem::MaybeUninit;
 use std::os::fd::OwnedFd;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
@@ -14,7 +15,7 @@ use std::process::{Child, Command};
 use std::sync::Arc;
 use std::{env, ptr};
 
-use libc::{c_int, TIOCSCTTY};
+use libc::{F_GETFL, F_SETFL, O_NONBLOCK, TIOCSCTTY, c_int, fcntl};
 use log::error;
 use polling::{Event, PollMode, Poller};
 use rustix_openpty::openpty;
@@ -22,7 +23,7 @@ use rustix_openpty::rustix::termios::Winsize;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use rustix_openpty::rustix::termios::{self, InputModes, OptionalActions};
 use signal_hook::low_level::{pipe as signal_pipe, unregister as unregister_signal};
-use signal_hook::{consts as sigconsts, SigId};
+use signal_hook::{SigId, consts as sigconsts};
 
 use crate::event::{OnResize, WindowSize};
 use crate::tty::{ChildEvent, EventedPty, EventedReadWrite, Options};
@@ -37,11 +38,11 @@ macro_rules! die {
     ($($arg:tt)*) => {{
         error!($($arg)*);
         std::process::exit(1);
-    }}
+    }};
 }
 
 /// Really only needed on BSD, but should be fine elsewhere.
-fn set_controlling_terminal(fd: c_int) {
+fn set_controlling_terminal(fd: c_int) -> Result<()> {
     let res = unsafe {
         // TIOSCTTY changes based on platform and the `ioctl` call is different
         // based on architecture (32/64). So a generic cast is used to make sure
@@ -51,9 +52,7 @@ fn set_controlling_terminal(fd: c_int) {
         libc::ioctl(fd, TIOCSCTTY as _, 0)
     };
 
-    if res < 0 {
-        die!("ioctl TIOCSCTTY failed: {}", Error::last_os_error());
-    }
+    if res == 0 { Ok(()) } else { Err(Error::last_os_error()) }
 }
 
 #[derive(Debug)]
@@ -82,11 +81,11 @@ fn get_pw_entry(buf: &mut [i8; 1024]) -> Result<Passwd<'_>> {
     let entry = unsafe { entry.assume_init() };
 
     if status < 0 {
-        return Err(Error::new(ErrorKind::Other, "getpwuid_r failed"));
+        return Err(Error::other("getpwuid_r failed"));
     }
 
     if res.is_null() {
-        return Err(Error::new(ErrorKind::Other, "pw not found"));
+        return Err(Error::other("pw not found"));
     }
 
     // Sanity check.
@@ -241,21 +240,25 @@ pub fn from_fd(config: &Options, window_id: u64, master: OwnedFd, slave: OwnedFd
     builder.env_remove("XDG_ACTIVATION_TOKEN");
     builder.env_remove("DESKTOP_STARTUP_ID");
 
-    let working_directory = config.working_directory.clone();
+    let working_directory = config
+        .working_directory
+        .as_ref()
+        .and_then(|path| CString::new(path.as_os_str().as_bytes()).ok());
+
     unsafe {
         builder.pre_exec(move || {
             // Create a new process group.
             let err = libc::setsid();
             if err == -1 {
-                return Err(Error::new(ErrorKind::Other, "Failed to set session id"));
+                return Err(Error::last_os_error());
             }
 
             // Set working directory, ignoring invalid paths.
             if let Some(working_directory) = working_directory.as_ref() {
-                let _ = env::set_current_dir(working_directory);
+                libc::chdir(working_directory.as_ptr());
             }
 
-            set_controlling_terminal(slave_fd);
+            set_controlling_terminal(slave_fd)?;
 
             // No longer need slave/master fds.
             libc::close(slave_fd);
@@ -383,7 +386,7 @@ impl EventedPty for Pty {
         let mut buf = [0u8; 1];
         if let Err(err) = self.signals.read(&mut buf) {
             if err.kind() != ErrorKind::WouldBlock {
-                error!("Error reading from signal pipe: {}", err);
+                error!("Error reading from signal pipe: {err}");
             }
             return None;
         }
@@ -391,11 +394,11 @@ impl EventedPty for Pty {
         // Match on the child process.
         match self.child.try_wait() {
             Err(err) => {
-                error!("Error checking child process termination: {}", err);
+                error!("Error checking child process termination: {err}");
                 None
             },
             Ok(None) => None,
-            Ok(exit_status) => Some(ChildEvent::Exited(exit_status.and_then(|s| s.code()))),
+            Ok(exit_status) => Some(ChildEvent::Exited(exit_status)),
         }
     }
 }
@@ -434,9 +437,7 @@ impl ToWinsize for WindowSize {
 }
 
 unsafe fn set_nonblocking(fd: c_int) {
-    use libc::{fcntl, F_GETFL, F_SETFL, O_NONBLOCK};
-
-    let res = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    let res = unsafe { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK) };
     assert_eq!(res, 0);
 }
 

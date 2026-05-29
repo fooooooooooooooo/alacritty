@@ -30,11 +30,10 @@ Please refer to the [Dependencies](#dependencies) section.
         10. [Solus](#solus)
         11. [NixOS/Nixpkgs](#nixosnixpkgs)
         12. [Gentoo](#gentoo)
-        13. [Clear Linux](#clear-linux)
-        14. [GNU Guix](#gnu-guix)
-        15. [Alpine Linux](#alpine-linux)
-        16. [Windows](#windows)
-        17. [Other](#other)
+        13. [GNU Guix](#gnu-guix)
+        14. [Alpine Linux](#alpine-linux)
+        15. [Windows](#windows)
+        16. [Other](#other)
 2. [Building](#building)
     1. [Linux/Windows/BSD](#linux--windows--bsd)
     2. [macOS](#macos)
@@ -84,7 +83,7 @@ to build Alacritty. Here's an apt command that should install all of them. If
 something is still found to be missing, please open an issue.
 
 ```sh
-apt install cmake g++ pkg-config libfreetype6-dev libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
+apt install cmake g++ pkg-config libfontconfig1-dev libxcb-xfixes0-dev libxkbcommon-dev python3
 ```
 
 #### Arch Linux
@@ -136,7 +135,7 @@ a `zypper` command that should install all of them. If something is
 still found to be missing, please open an issue.
 
 ```sh
-zypper install cmake freetype-devel fontconfig-devel libxcb-devel libxkbcommon-devel
+zypper install cmake freetype-devel fontconfig-devel libxcb-devel libxkbcommon-devel gcc-c++
 ```
 
 #### Slackware
@@ -204,16 +203,6 @@ please open an issue.
 
 ```sh
 emerge --onlydeps x11-terms/alacritty
-```
-
-#### Clear Linux
-
-On Clear Linux, you need a few extra libraries to build Alacritty. Here's a
-`swupd` command that should install all of them. If something is still found
-to be missing, please open an issue.
-
-```sh
-swupd bundle-add devpkg-expat devpkg-freetype devpkg-libxcb devpkg-fontconfig
 ```
 
 #### GNU Guix
@@ -332,10 +321,12 @@ Installing the manual page requires the additional dependencies `gzip` and `scdo
 ```sh
 sudo mkdir -p /usr/local/share/man/man1
 sudo mkdir -p /usr/local/share/man/man5
+sudo mkdir -p /usr/local/share/man/man7
 scdoc < extra/man/alacritty.1.scd | gzip -c | sudo tee /usr/local/share/man/man1/alacritty.1.gz > /dev/null
 scdoc < extra/man/alacritty-msg.1.scd | gzip -c | sudo tee /usr/local/share/man/man1/alacritty-msg.1.gz > /dev/null
 scdoc < extra/man/alacritty.5.scd | gzip -c | sudo tee /usr/local/share/man/man5/alacritty.5.gz > /dev/null
 scdoc < extra/man/alacritty-bindings.5.scd | gzip -c | sudo tee /usr/local/share/man/man5/alacritty-bindings.5.gz > /dev/null
+scdoc < extra/man/alacritty-escapes.7.scd | gzip -c | sudo tee /usr/local/share/man/man7/alacritty-escapes.7.gz > /dev/null
 ```
 
 ### Shell completions

@@ -8,6 +8,7 @@ use std::mem;
 use std::os::unix::io::{AsRawFd, RawFd};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Instant;
 
 use glutin::config::Config as GlutinConfig;
 use glutin::display::GetGlDisplay;
@@ -32,8 +33,8 @@ use alacritty_terminal::tty;
 use crate::cli::{ParsedOptions, WindowOptions};
 use crate::clipboard::Clipboard;
 use crate::config::UiConfig;
-use crate::display::window::Window;
 use crate::display::Display;
+use crate::display::window::Window;
 use crate::event::{
     ActionContext, Event, EventProxy, InlineSearchState, Mouse, SearchState, TouchPurpose,
 };
@@ -62,6 +63,7 @@ pub struct WindowContext {
     tabs: Vec<TerminalTab>,
     active_tab_index: usize,
     cursor_blink_timed_out: bool,
+    prev_bell_cmd: Option<Instant>,
     modifiers: Modifiers,
     inline_search_state: InlineSearchState,
     search_state: SearchState,
@@ -136,6 +138,13 @@ impl WindowContext {
         let mut identity = config.window.identity.clone();
         options.window_identity.override_identity_config(&mut identity);
 
+        // Check if new window will be opened as a tab.
+        // This must be done before `Window::new()`, which unsets `window_tabbing_id`.
+        #[cfg(target_os = "macos")]
+        let tabbed = options.window_tabbing_id.is_some();
+        #[cfg(not(target_os = "macos"))]
+        let tabbed = false;
+
         let window = Window::new(
             event_loop,
             &config,
@@ -149,12 +158,6 @@ impl WindowContext {
         let raw_window_handle = window.raw_window_handle();
         let gl_context =
             renderer::platform::create_gl_context(&gl_display, gl_config, Some(raw_window_handle))?;
-
-        // Check if new window will be opened as a tab.
-        #[cfg(target_os = "macos")]
-        let tabbed = options.window_tabbing_id.is_some();
-        #[cfg(not(target_os = "macos"))]
-        let tabbed = false;
 
         let display = Display::new(window, gl_context, &config, tabbed)?;
 
@@ -249,6 +252,7 @@ impl WindowContext {
             display,
             config,
             cursor_blink_timed_out: Default::default(),
+            prev_bell_cmd: Default::default(),
             inline_search_state: Default::default(),
             message_buffer: Default::default(),
             window_config: Default::default(),
@@ -327,6 +331,9 @@ impl WindowContext {
         self.display.window.set_transparent(!opaque);
         self.display.window.set_blur(self.config.window.blur);
 
+        #[cfg(windows)]
+        self.display.window.set_backdrop(self.config.window.backdrop);
+
         // Update hint keys.
         self.display.hint_state.update_alphabet(self.config.hints.alphabet());
 
@@ -335,6 +342,12 @@ impl WindowContext {
         self.event_queue.push(event.into());
 
         self.dirty = true;
+    }
+
+    /// Get reference to the window's configuration.
+    #[cfg(unix)]
+    pub fn config(&self) -> &UiConfig {
+        &self.config
     }
 
     /// Clear the window config overrides.
@@ -429,6 +442,7 @@ impl WindowContext {
 
         let context = ActionContext {
             cursor_blink_timed_out: &mut self.cursor_blink_timed_out,
+            prev_bell_cmd: &mut self.prev_bell_cmd,
             message_buffer: &mut self.message_buffer,
             inline_search_state: &mut self.inline_search_state,
             search_state: &mut self.search_state,

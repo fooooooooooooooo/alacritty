@@ -46,8 +46,8 @@ pub struct Binding<T> {
 /// Bindings that are triggered by a keyboard key.
 pub type KeyBinding = Binding<BindingKey>;
 
-/// Bindings that are triggered by a mouse button.
-pub type MouseBinding = Binding<MouseButton>;
+/// Bindings that are triggered by a mouse event.
+pub type MouseBinding = Binding<MouseEvent>;
 
 impl<T: Eq> Binding<T> {
     #[inline]
@@ -328,6 +328,10 @@ pub enum ViAction {
     InlineSearchNext,
     /// Jump to the previous inline search match.
     InlineSearchPrevious,
+    /// Search forward for selection or word under the cursor.
+    SemanticSearchForward,
+    /// Search backward for selection or word under the cursor.
+    SemanticSearchBackward,
 }
 
 /// Search mode specific actions.
@@ -357,6 +361,14 @@ pub enum SearchAction {
 pub enum MouseAction {
     /// Expand the selection to the current mouse cursor position.
     ExpandSelection,
+}
+
+/// Mouse binding specific events.
+#[derive(Debug, Hash, PartialEq, Eq, PartialOrd, Ord, Clone, Copy)]
+pub enum MouseEvent {
+    Button(MouseButton),
+    WheelUp,
+    WheelDown,
 }
 
 macro_rules! bindings {
@@ -396,21 +408,12 @@ macro_rules! bindings {
 }
 
 macro_rules! trigger {
-    (KeyBinding, $key:literal, $location:expr) => {{
-        BindingKey::Keycode { key: Key::Character($key.into()), location: $location }
-    }};
-    (KeyBinding, $key:literal,) => {{
-        BindingKey::Keycode { key: Key::Character($key.into()), location: KeyLocation::Any }
-    }};
-    (KeyBinding, $key:ident, $location:expr) => {{
-        BindingKey::Keycode { key: Key::Named(NamedKey::$key), location: $location }
-    }};
-    (KeyBinding, $key:ident,) => {{
-        BindingKey::Keycode { key: Key::Named(NamedKey::$key), location: KeyLocation::Any }
-    }};
-    (MouseBinding, $base:ident::$button:ident,) => {{
-        $base::$button
-    }};
+    (KeyBinding, $key:literal, $location:expr) => {{ BindingKey::Keycode { key: Key::Character($key.into()), location: $location } }};
+    (KeyBinding, $key:literal,) => {{ BindingKey::Keycode { key: Key::Character($key.into()), location: KeyLocation::Any } }};
+    (KeyBinding, $key:ident, $location:expr) => {{ BindingKey::Keycode { key: Key::Named(NamedKey::$key), location: $location } }};
+    (KeyBinding, $key:ident,) => {{ BindingKey::Keycode { key: Key::Named(NamedKey::$key), location: KeyLocation::Any } }};
+    (MouseBinding, MouseButton::$button:ident,) => {{ MouseEvent::Button(MouseButton::$button) }};
+    (MouseBinding, MouseEvent::$event:ident,) => {{ MouseEvent::$event }};
 }
 
 pub fn default_mouse_bindings() -> Vec<MouseBinding> {
@@ -449,11 +452,11 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         F2,         ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1bOQ".into());
         F3,         ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1bOR".into());
         F4,         ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1bOS".into());
-        Tab,       ModifiersState::SHIFT,   ~BindingMode::VI,   ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x1b[Z".into());
-        Tab,       ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x1b\x1b[Z".into());
+        Tab,       ModifiersState::SHIFT,   ~BindingMode::VI,   ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1b[Z".into());
+        Tab,       ModifiersState::SHIFT | ModifiersState::ALT, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1b\x1b[Z".into());
         Backspace, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x7f".into());
-        Backspace, ModifiersState::ALT,     ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x1b\x7f".into());
-        Backspace, ModifiersState::SHIFT,   ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC; Action::Esc("\x7f".into());
+        Backspace, ModifiersState::ALT,     ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x1b\x7f".into());
+        Backspace, ModifiersState::SHIFT,   ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\x7f".into());
         Enter => KeyLocation::Numpad, ~BindingMode::VI, ~BindingMode::SEARCH, ~BindingMode::REPORT_ALL_KEYS_AS_ESC, ~BindingMode::DISAMBIGUATE_ESC_CODES; Action::Esc("\n".into());
         // Vi mode.
         Space, ModifiersState::SHIFT | ModifiersState::CONTROL, ~BindingMode::SEARCH; Action::ToggleViMode;
@@ -474,6 +477,10 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         "y",                                +BindingMode::VI, ~BindingMode::SEARCH; Action::ClearSelection;
         "/",                                +BindingMode::VI, ~BindingMode::SEARCH; Action::SearchForward;
         "?",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; Action::SearchBackward;
+        "y",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViAction::ToggleNormalSelection;
+        "y",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Last;
+        "y",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; Action::Copy;
+        "y",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; Action::ClearSelection;
         "v",                                +BindingMode::VI, ~BindingMode::SEARCH; ViAction::ToggleNormalSelection;
         "v",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViAction::ToggleLineSelection;
         "v",      ModifiersState::CONTROL,  +BindingMode::VI, ~BindingMode::SEARCH; ViAction::ToggleBlockSelection;
@@ -488,6 +495,8 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         "t",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViAction::InlineSearchBackwardShort;
         ";",                                +BindingMode::VI, ~BindingMode::SEARCH; ViAction::InlineSearchNext;
         ",",                                +BindingMode::VI, ~BindingMode::SEARCH; ViAction::InlineSearchPrevious;
+        "*",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViAction::SemanticSearchForward;
+        "#",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViAction::SemanticSearchBackward;
         "k",                                +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Up;
         "j",                                +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Down;
         "h",                                +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Left;
@@ -511,6 +520,8 @@ pub fn default_key_bindings() -> Vec<KeyBinding> {
         "w",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::WordRight;
         "e",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::WordRightEnd;
         "%",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::Bracket;
+        "{",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::ParagraphUp;
+        "}",      ModifiersState::SHIFT,    +BindingMode::VI, ~BindingMode::SEARCH; ViMotion::ParagraphDown;
         Enter,                              +BindingMode::VI, +BindingMode::SEARCH; SearchAction::SearchConfirm;
         // Plain search.
         Escape,                             +BindingMode::SEARCH; SearchAction::SearchCancel;
@@ -845,15 +856,7 @@ impl<'a> Deserialize<'a> for ModeWrapper {
     }
 }
 
-struct MouseButtonWrapper(MouseButton);
-
-impl MouseButtonWrapper {
-    fn into_inner(self) -> MouseButton {
-        self.0
-    }
-}
-
-impl<'a> Deserialize<'a> for MouseButtonWrapper {
+impl<'a> Deserialize<'a> for MouseEvent {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'a>,
@@ -861,42 +864,47 @@ impl<'a> Deserialize<'a> for MouseButtonWrapper {
         struct MouseButtonVisitor;
 
         impl Visitor<'_> for MouseButtonVisitor {
-            type Value = MouseButtonWrapper;
+            type Value = MouseEvent;
 
             fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("Left, Right, Middle, Back, Forward, or a number from 0 to 65536")
+                f.write_str(
+                    "Left, Right, Middle, Back, Forward, WheelUp, WheelDown, or a number from 0 \
+                     to 65536",
+                )
             }
 
-            fn visit_i64<E>(self, value: i64) -> Result<MouseButtonWrapper, E>
+            fn visit_i64<E>(self, value: i64) -> Result<MouseEvent, E>
             where
                 E: de::Error,
             {
                 match value {
-                    0..=65536 => Ok(MouseButtonWrapper(MouseButton::Other(value as u16))),
+                    0..=65536 => Ok(MouseEvent::Button(MouseButton::Other(value as u16))),
                     _ => Err(E::invalid_value(Unexpected::Signed(value), &self)),
                 }
             }
 
-            fn visit_u64<E>(self, value: u64) -> Result<MouseButtonWrapper, E>
+            fn visit_u64<E>(self, value: u64) -> Result<MouseEvent, E>
             where
                 E: de::Error,
             {
                 match value {
-                    0..=65536 => Ok(MouseButtonWrapper(MouseButton::Other(value as u16))),
+                    0..=65536 => Ok(MouseEvent::Button(MouseButton::Other(value as u16))),
                     _ => Err(E::invalid_value(Unexpected::Unsigned(value), &self)),
                 }
             }
 
-            fn visit_str<E>(self, value: &str) -> Result<MouseButtonWrapper, E>
+            fn visit_str<E>(self, value: &str) -> Result<MouseEvent, E>
             where
                 E: de::Error,
             {
                 match value {
-                    "Left" => Ok(MouseButtonWrapper(MouseButton::Left)),
-                    "Right" => Ok(MouseButtonWrapper(MouseButton::Right)),
-                    "Middle" => Ok(MouseButtonWrapper(MouseButton::Middle)),
-                    "Back" => Ok(MouseButtonWrapper(MouseButton::Back)),
-                    "Forward" => Ok(MouseButtonWrapper(MouseButton::Forward)),
+                    "Left" => Ok(MouseEvent::Button(MouseButton::Left)),
+                    "Right" => Ok(MouseEvent::Button(MouseButton::Right)),
+                    "Middle" => Ok(MouseEvent::Button(MouseButton::Middle)),
+                    "Back" => Ok(MouseEvent::Button(MouseButton::Back)),
+                    "Forward" => Ok(MouseEvent::Button(MouseButton::Forward)),
+                    "WheelUp" => Ok(MouseEvent::WheelUp),
+                    "WheelDown" => Ok(MouseEvent::WheelDown),
                     _ => Err(E::invalid_value(Unexpected::Str(value), &self)),
                 }
             }
@@ -911,7 +919,7 @@ impl<'a> Deserialize<'a> for MouseButtonWrapper {
 #[derive(PartialEq, Eq)]
 struct RawBinding {
     key: Option<BindingKey>,
-    mouse: Option<MouseButton>,
+    mouse: Option<MouseEvent>,
     mods: ModifiersState,
     mode: BindingMode,
     notmode: BindingMode,
@@ -1018,7 +1026,7 @@ impl<'a> Deserialize<'a> for RawBinding {
                 let mut action: Option<Action> = None;
                 let mut mode: Option<BindingMode> = None;
                 let mut not_mode: Option<BindingMode> = None;
-                let mut mouse: Option<MouseButton> = None;
+                let mut mouse: Option<MouseEvent> = None;
                 let mut command: Option<Program> = None;
 
                 use de::Error;
@@ -1113,7 +1121,7 @@ impl<'a> Deserialize<'a> for RawBinding {
                                 return Err(<V::Error as Error>::duplicate_field("mouse"));
                             }
 
-                            mouse = Some(map.next_value::<MouseButtonWrapper>()?.into_inner());
+                            mouse = Some(map.next_value::<MouseEvent>()?);
                         },
                         Field::Command => {
                             if command.is_some() {

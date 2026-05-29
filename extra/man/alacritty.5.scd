@@ -7,7 +7,7 @@ Alacritty - TOML configuration file format.
 # SYNTAX
 
 Alacritty's configuration file uses the TOML format. The format's specification
-can be found at _https://toml.io/en/v1.0.0_.
+can be found at _https://toml.io/en/v1.1.0_.
 
 # LOCATION
 
@@ -18,6 +18,7 @@ following locations on UNIX systems:
 . _$XDG_CONFIG_HOME/alacritty.toml_
 . _$HOME/.config/alacritty/alacritty.toml_
 . _$HOME/.alacritty.toml_
+. _/etc/alacritty/alacritty.toml_
 
 On Windows, the config file will be looked for in:
 
@@ -183,7 +184,7 @@ This section documents the *[window]* table of the configuration file.
 
 	Default: _"None"_
 
-*resize_increments* = _true_ | _false_ # _(works on macOS/X11)_
+*resize_increments* = _true_ | _false_ # _(works on macOS/X11/Wayland)_
 
 	Prefer resizing window by discrete steps equal to cell dimensions.
 
@@ -644,7 +645,7 @@ This section documents the *[mouse]* table of the configuration file.
 	the event, actions for the event without the `Shift` modifier are triggered
 	instead.
 
-	*mouse* = _"Middle"_ | _"Left"_ | _"Right"_ | _"Back"_ | _"Forward"_ | _<integer>_
+	*mouse* = _"Middle"_ | _"Left"_ | _"Right"_ | _"Back"_ | _"Forward"_ | _"WheelUp"_ | _"WheelDown"_ | _<integer>_
 
 		Mouse button which needs to be pressed to trigger this binding.
 
@@ -894,6 +895,10 @@ _https://docs.rs/winit/latest/winit/keyboard/enum.Key.html#variant.Dead_
 			Move to end of whitespace separated word.
 		*Bracket*
 			Move to opposing bracket.
+		*ParagraphUp*
+			Move above the current paragraph.
+		*ParagraphDown*
+			Move below the current paragraph.
 		*ToggleNormalSelection*
 			Toggle normal vi selection.
 		*ToggleLineSelection*
@@ -926,6 +931,10 @@ _https://docs.rs/winit/latest/winit/keyboard/enum.Key.html#variant.Dead_
 			Jump to the next inline search match.
 		*InlineSearchPrevious*
 			Jump to the previous inline search match.
+		*SemanticSearchForward*
+			Search forward for selection or word under the cursor.
+		*SemanticSearchBackward*
+			Search backward for selection or word under the cursor.
 
 		_Search actions:_
 
@@ -1054,7 +1063,7 @@ relied upon.
 
 # SEE ALSO
 
-*alacritty*(1), *alacritty-msg*(1), *alacritty-bindings*(5)
+*alacritty*(1), *alacritty-msg*(1), *alacritty-bindings*(5), *alacritty-escapes*(7)
 
 # BUGS
 

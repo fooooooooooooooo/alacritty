@@ -6,7 +6,7 @@
 //! determine what to do when a non-modifier key is pressed.
 
 use std::borrow::Cow;
-use std::cmp::{max, min, Ordering};
+use std::cmp::{Ordering, max, min};
 use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fmt::Debug;
@@ -38,9 +38,11 @@ use alacritty_terminal::vte::ansi::{ClearMode, Handler};
 use crate::clipboard::Clipboard;
 #[cfg(target_os = "macos")]
 use crate::config::window::Decorations;
-use crate::config::{Action, BindingMode, MouseAction, SearchAction, UiConfig, ViAction};
+use crate::config::{
+    Action, BindingMode, MouseAction, MouseEvent, SearchAction, UiConfig, ViAction,
+};
 use crate::display::hint::HintMatch;
-use crate::display::window::Window;
+use crate::display::window::{ImeInhibitor, Window};
 use crate::display::{Display, SizeInfo};
 use crate::event::{
     ClickState, Event, EventType, InlineSearchState, Mouse, TouchPurpose, TouchZoom,
@@ -116,6 +118,7 @@ pub trait ActionContext<T: EventListener> {
     fn clipboard_mut(&mut self) -> &mut Clipboard;
     fn scheduler_mut(&mut self) -> &mut Scheduler;
     fn start_search(&mut self, _direction: Direction) {}
+    fn start_seeded_search(&mut self, _direction: Direction, _text: String) {}
     fn confirm_search(&mut self) {}
     fn cancel_search(&mut self) {}
     fn search_input(&mut self, _c: char) {}
@@ -136,6 +139,7 @@ pub trait ActionContext<T: EventListener> {
     fn hint_input(&mut self, _character: char) {}
     fn trigger_hint(&mut self, _hint: &HintMatch) {}
     fn expand_selection(&mut self) {}
+    fn semantic_word(&self, point: Point) -> String;
     fn on_terminal_input_start(&mut self) {}
     fn paste(&mut self, _text: &str, _bracketed: bool) {}
     fn spawn_daemon<I, S>(&self, _program: &str, _args: I)
@@ -282,6 +286,21 @@ impl<T: EventListener> Execute<T> for Action {
             },
             Action::Vi(ViAction::InlineSearchNext) => ctx.inline_search_next(),
             Action::Vi(ViAction::InlineSearchPrevious) => ctx.inline_search_previous(),
+            Action::Vi(ViAction::SemanticSearchForward | ViAction::SemanticSearchBackward) => {
+                let seed_text = match ctx.terminal().selection_to_string() {
+                    Some(selection) if !selection.is_empty() => selection,
+                    // Get semantic word at the vi cursor position.
+                    _ => ctx.semantic_word(ctx.terminal().vi_mode_cursor.point),
+                };
+
+                if !seed_text.is_empty() {
+                    let direction = match self {
+                        Action::Vi(ViAction::SemanticSearchForward) => Direction::Right,
+                        _ => Direction::Left,
+                    };
+                    ctx.start_seeded_search(direction, seed_text);
+                }
+            },
             action @ Action::Search(_) if !ctx.search_active() => {
                 debug!("Ignoring {action:?}: Search mode inactive");
             },
@@ -764,20 +783,29 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
         let width = f64::from(self.ctx.size_info().cell_width());
         let height = f64::from(self.ctx.size_info().cell_height());
 
-        if self.ctx.mouse_mode() {
-            self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px;
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px;
+        let multiplier = if self.ctx.mouse_mode() { 1. } else { multiplier };
 
-            let code = if new_scroll_y_px > 0. { MOUSE_WHEEL_UP } else { MOUSE_WHEEL_DOWN };
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as i32;
+        self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px * multiplier;
+        self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
 
+        let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as usize;
+        let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as usize;
+
+        let is_scroll_up = new_scroll_y_px > 0.;
+        let event = if is_scroll_up { MouseEvent::WheelUp } else { MouseEvent::WheelDown };
+
+        if lines != 0 && self.process_mouse_bindings(event) {
+            // Repeat for remaining number of lines.
+            for _ in 1..lines {
+                self.process_mouse_bindings(event);
+            }
+        } else if self.ctx.mouse_mode() {
+            let code = if is_scroll_up { MOUSE_WHEEL_UP } else { MOUSE_WHEEL_DOWN };
             for _ in 0..lines {
                 self.mouse_report(code, ElementState::Pressed);
             }
 
             let code = if new_scroll_x_px > 0. { MOUSE_WHEEL_LEFT } else { MOUSE_WHEEL_RIGHT };
-            let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as i32;
-
             for _ in 0..columns {
                 self.mouse_report(code, ElementState::Pressed);
             }
@@ -788,15 +816,9 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
             .contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
             && !self.ctx.modifiers().state().shift_key()
         {
-            self.ctx.mouse_mut().accumulated_scroll.x += new_scroll_x_px * multiplier;
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
-
             // The chars here are the same as for the respective arrow keys.
-            let line_cmd = if new_scroll_y_px > 0. { b'A' } else { b'B' };
+            let line_cmd = if is_scroll_up { b'A' } else { b'B' };
             let column_cmd = if new_scroll_x_px > 0. { b'D' } else { b'C' };
-
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height).abs() as usize;
-            let columns = (self.ctx.mouse().accumulated_scroll.x / width).abs() as usize;
 
             let mut content = Vec::with_capacity(3 * (lines + columns));
 
@@ -813,14 +835,9 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
             }
 
             self.ctx.write_to_pty(content);
-        } else {
-            self.ctx.mouse_mut().accumulated_scroll.y += new_scroll_y_px * multiplier;
-
-            let lines = (self.ctx.mouse().accumulated_scroll.y / height) as i32;
-
-            if lines != 0 {
-                self.ctx.scroll(Scroll::Delta(lines));
-            }
+        } else if lines != 0 {
+            let lines = if is_scroll_up { lines as i32 } else { -(lines as i32) };
+            self.ctx.scroll(Scroll::Delta(lines));
         }
 
         self.ctx.mouse_mut().accumulated_scroll.x %= width;
@@ -847,11 +864,25 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
     /// Handle beginning of touch input.
     pub fn on_touch_start(&mut self, touch: TouchEvent) {
+        // Inhibit IME on touch while not focused, forcing a touch tap while focused to enable IME.
+        if !self.ctx.terminal().is_focused {
+            self.ctx.window().set_ime_inhibitor(ImeInhibitor::TOUCH, true);
+        }
+
         let touch_purpose = self.ctx.touch_purpose();
         *touch_purpose = match mem::take(touch_purpose) {
             TouchPurpose::None => TouchPurpose::Tap(touch),
             TouchPurpose::Tap(start) => TouchPurpose::Zoom(TouchZoom::new((start, touch))),
-            TouchPurpose::Zoom(zoom) => TouchPurpose::Invalid(zoom.slots()),
+            TouchPurpose::ZoomPendingSlot(slot) => {
+                TouchPurpose::Zoom(TouchZoom::new((slot, touch)))
+            },
+            TouchPurpose::Zoom(zoom) => {
+                let slots = zoom.slots();
+                let mut set = HashSet::default();
+                set.insert(slots.0.id);
+                set.insert(slots.1.id);
+                TouchPurpose::Invalid(set)
+            },
             TouchPurpose::Scroll(event) | TouchPurpose::Select(event) => {
                 let mut set = HashSet::default();
                 set.insert(event.id);
@@ -905,7 +936,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 self.scroll_terminal(0., delta_y, 1.0);
             },
             TouchPurpose::Select(_) => self.mouse_moved(touch.location),
-            TouchPurpose::Invalid(_) => (),
+            TouchPurpose::ZoomPendingSlot(_) | TouchPurpose::Invalid(_) => (),
         }
     }
 
@@ -924,13 +955,16 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 self.mouse_moved(start_location);
                 self.mouse_input(ElementState::Pressed, MouseButton::Left);
                 self.mouse_input(ElementState::Released, MouseButton::Left);
+
+                self.ctx.window().set_ime_inhibitor(ImeInhibitor::TOUCH, false);
             },
-            // Invalidate zoom once a finger was released.
+            // Transition zoom to pending state once a finger was released.
             TouchPurpose::Zoom(zoom) => {
-                let mut slots = zoom.slots();
-                slots.remove(&touch.id);
-                *touch_purpose = TouchPurpose::Invalid(slots);
+                let slots = zoom.slots();
+                let remaining = if slots.0.id == touch.id { slots.1 } else { slots.0 };
+                *touch_purpose = TouchPurpose::ZoomPendingSlot(remaining);
             },
+            TouchPurpose::ZoomPendingSlot(_) => *touch_purpose = Default::default(),
             // Reset touch state once all slots were released.
             TouchPurpose::Invalid(slots) => {
                 slots.remove(&touch.id);
@@ -1008,7 +1042,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
                 ElementState::Pressed => {
                     // Process mouse press before bindings to update the `click_state`.
                     self.on_mouse_press(button);
-                    self.process_mouse_bindings(button);
+                    self.process_mouse_bindings(MouseEvent::Button(button));
                 },
                 ElementState::Released => self.on_mouse_release(button),
             }
@@ -1019,7 +1053,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
     ///
     /// The provided mode, mods, and key must match what is allowed by a binding
     /// for its action to be executed.
-    fn process_mouse_bindings(&mut self, button: MouseButton) {
+    fn process_mouse_bindings(&mut self, event: MouseEvent) -> bool {
         let mode = BindingMode::new(self.ctx.terminal().mode(), self.ctx.search_active());
         let mouse_mode = self.ctx.mouse_mode();
         let mods = self.ctx.modifiers().state();
@@ -1027,24 +1061,27 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
         // If mouse mode is active, also look for bindings without shift.
         let fallback_allowed = mouse_mode && mods.contains(ModifiersState::SHIFT);
-        let mut exact_match_found = false;
+        let mut match_found: bool = false;
 
         for binding in &mouse_bindings {
             // Don't trigger normal bindings in mouse mode unless Shift is pressed.
-            if binding.is_triggered_by(mode, mods, &button) && (fallback_allowed || !mouse_mode) {
+            if binding.is_triggered_by(mode, mods, &event) && (fallback_allowed || !mouse_mode) {
                 binding.action.execute(&mut self.ctx);
-                exact_match_found = true;
+                match_found = true;
             }
         }
 
-        if fallback_allowed && !exact_match_found {
+        if fallback_allowed && !match_found {
             let fallback_mods = mods & !ModifiersState::SHIFT;
             for binding in &mouse_bindings {
-                if binding.is_triggered_by(mode, fallback_mods, &button) {
+                if binding.is_triggered_by(mode, fallback_mods, &event) {
                     binding.action.execute(&mut self.ctx);
+                    match_found = true;
                 }
             }
         }
+
+        match_found
     }
 
     /// Check mouse icon state in relation to the message bar.
@@ -1083,7 +1120,7 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
         if let Some(mouse_state) = self.message_bar_cursor_state() {
             mouse_state
-        } else if self.ctx.display().highlighted_hint.as_ref().map_or(false, hint_highlighted) {
+        } else if self.ctx.display().highlighted_hint.as_ref().is_some_and(hint_highlighted) {
             CursorIcon::Pointer
         } else if !self.ctx.modifiers().state().shift_key() && self.ctx.mouse_mode() {
             CursorIcon::Default
@@ -1252,6 +1289,10 @@ mod tests {
         }
 
         fn scheduler_mut(&mut self) -> &mut Scheduler {
+            unimplemented!();
+        }
+
+        fn semantic_word(&self, _point: Point) -> String {
             unimplemented!();
         }
     }

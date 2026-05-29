@@ -22,11 +22,12 @@ use std::fmt::{self, Display, Formatter};
 
 #[cfg(target_os = "macos")]
 use {
+    objc2::MainThreadMarker,
     objc2_app_kit::{NSColorSpace, NSView},
-    objc2_foundation::is_main_thread,
     winit::platform::macos::{OptionAsAlt, WindowAttributesExtMacOS, WindowExtMacOS},
 };
 
+use bitflags::bitflags;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
@@ -41,8 +42,10 @@ use winit::window::{
 use alacritty_terminal::index::Point;
 
 use crate::cli::WindowOptions;
-use crate::config::window::{Decorations, Identity, WindowConfig};
 use crate::config::UiConfig;
+#[cfg(windows)]
+use crate::config::window::BackdropKind;
+use crate::config::window::{Decorations, Identity, WindowConfig};
 use crate::display::SizeInfo;
 
 /// Window icon for `_NET_WM_ICON` property.
@@ -120,6 +123,7 @@ pub struct Window {
     is_x11: bool,
     current_mouse_cursor: CursorIcon,
     mouse_visible: bool,
+    ime_inhibitor: ImeInhibitor,
 }
 
 impl Window {
@@ -198,7 +202,7 @@ impl Window {
         use_srgb_color_space(&window);
 
         let scale_factor = window.scale_factor();
-        log::info!("Window scale factor: {}", scale_factor);
+        log::info!("Window scale factor: {scale_factor}");
         let is_x11 = matches!(window.window_handle().unwrap().as_raw(), RawWindowHandle::Xlib(_));
 
         Ok(Self {
@@ -211,6 +215,7 @@ impl Window {
             scale_factor,
             window,
             is_x11,
+            ime_inhibitor: Default::default(),
         })
     }
 
@@ -275,6 +280,11 @@ impl Window {
             self.mouse_visible = visible;
             self.window.set_cursor_visible(visible);
         }
+    }
+
+    #[inline]
+    pub fn mouse_visible(&self) -> bool {
+        self.mouse_visible
     }
 
     #[cfg(not(any(target_os = "macos", windows)))]
@@ -368,6 +378,19 @@ impl Window {
         self.window.set_blur(blur);
     }
 
+    #[cfg(windows)]
+    pub fn set_backdrop(&self, backdrop: BackdropKind) {
+        use winit::platform::windows::{BackdropType, WindowExtWindows};
+
+        self.window.set_system_backdrop(match backdrop {
+            BackdropKind::Auto => BackdropType::Auto,
+            BackdropKind::None => BackdropType::None,
+            BackdropKind::Mica => BackdropType::MainWindow,
+            BackdropKind::Acrylic => BackdropType::TransientWindow,
+            BackdropKind::AltMica => BackdropType::TabbedWindow,
+        });
+    }
+
     pub fn set_maximized(&self, maximized: bool) {
         self.window.set_maximized(maximized);
     }
@@ -428,10 +451,13 @@ impl Window {
         self.window.set_simple_fullscreen(simple_fullscreen);
     }
 
-    pub fn set_ime_allowed(&self, allowed: bool) {
-        // Skip runtime IME manipulation on X11 since it breaks some IMEs.
-        if !self.is_x11 {
-            self.window.set_ime_allowed(allowed);
+    /// Set IME inhibitor state and disable IME while any are present.
+    ///
+    /// IME is re-enabled once all inhibitors are unset.
+    pub fn set_ime_inhibitor(&mut self, inhibitor: ImeInhibitor, inhibit: bool) {
+        if self.ime_inhibitor.contains(inhibitor) != inhibit {
+            self.ime_inhibitor.set(inhibitor, inhibit);
+            self.window.set_ime_allowed(self.ime_inhibitor.is_empty());
         }
     }
 
@@ -463,7 +489,7 @@ impl Window {
     pub fn set_has_shadow(&self, has_shadows: bool) {
         let view = match self.raw_window_handle() {
             RawWindowHandle::AppKit(handle) => {
-                assert!(is_main_thread());
+                assert!(MainThreadMarker::new().is_some());
                 unsafe { handle.ns_view.cast::<NSView>().as_ref() }
             },
             _ => return,
@@ -502,17 +528,25 @@ impl Window {
     }
 }
 
+bitflags! {
+    /// IME inhibition sources.
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub struct ImeInhibitor: u8 {
+        const FOCUS = 1;
+        const TOUCH = 1 << 1;
+        const VI    = 1 << 2;
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn use_srgb_color_space(window: &WinitWindow) {
     let view = match window.window_handle().unwrap().as_raw() {
         RawWindowHandle::AppKit(handle) => {
-            assert!(is_main_thread());
+            assert!(MainThreadMarker::new().is_some());
             unsafe { handle.ns_view.cast::<NSView>().as_ref() }
         },
         _ => return,
     };
 
-    unsafe {
-        view.window().unwrap().setColorSpace(Some(&NSColorSpace::sRGBColorSpace()));
-    }
+    view.window().unwrap().setColorSpace(Some(&NSColorSpace::sRGBColorSpace()));
 }

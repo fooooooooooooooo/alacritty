@@ -72,6 +72,7 @@ set of features with high performance.
 		. _$XDG_CONFIG_HOME/alacritty.toml_
 		. _$HOME/.config/alacritty/alacritty.toml_
 		. _$HOME/.alacritty.toml_
+		. _/etc/alacritty/alacritty.toml_
 
 	On Windows, the config file will be looked for in:
 
@@ -137,7 +138,7 @@ set of features with high performance.
 
 # SEE ALSO
 
-*alacritty-msg*(1), *alacritty*(5), *alacritty-bindings*(5)
+*alacritty-msg*(1), *alacritty*(5), *alacritty-bindings*(5), *alacritty-escapes*(7)
 
 # BUGS
 

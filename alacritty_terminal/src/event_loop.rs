@@ -6,13 +6,13 @@ use std::fmt::{self, Display, Formatter};
 use std::fs::File;
 use std::io::{self, ErrorKind, Read, Write};
 use std::num::NonZeroUsize;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::sync::Arc;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
 use std::thread::JoinHandle;
 use std::time::Instant;
 
 use log::error;
-use polling::{Event as PollingEvent, Events, PollMode};
+use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
 use crate::event::{self, Event, EventListener, WindowSize};
 use crate::sync::FairMutex;
@@ -44,7 +44,7 @@ pub enum Msg {
 /// Handles all the PTY I/O and runs the PTY parser which updates terminal
 /// state.
 pub struct EventLoop<T: tty::EventedPty, U: EventListener> {
-    poll: Arc<polling::Poller>,
+    poll: Arc<Poller>,
     pty: T,
     rx: PeekableReceiver<Msg>,
     tx: Sender<Msg>,
@@ -68,7 +68,7 @@ where
         ref_test: bool,
     ) -> io::Result<EventLoop<T, U>> {
         let (tx, rx) = mpsc::channel();
-        let poll = polling::Poller::new()?.into();
+        let poll = Poller::new()?.into();
         Ok(EventLoop {
             poll,
             pty,
@@ -212,7 +212,7 @@ where
 
             // Register TTY through EventedRW interface.
             if let Err(err) = unsafe { self.pty.register(&self.poll, interest, poll_opts) } {
-                error!("Event loop registration error: {}", err);
+                error!("Event loop registration error: {err}");
                 return (self, state);
             }
 
@@ -235,7 +235,7 @@ where
                     match err.kind() {
                         ErrorKind::Interrupted => continue,
                         _ => {
-                            error!("Event loop polling error: {}", err);
+                            error!("Event loop polling error: {err}");
                             break 'event_loop;
                         },
                     }
@@ -256,10 +256,11 @@ where
                 for event in events.iter() {
                     match event.key {
                         tty::PTY_CHILD_EVENT_TOKEN => {
-                            if let Some(tty::ChildEvent::Exited(code)) = self.pty.next_child_event()
+                            if let Some(tty::ChildEvent::Exited(status)) =
+                                self.pty.next_child_event()
                             {
-                                if let Some(code) = code {
-                                    self.event_proxy.send_event(Event::ChildExit(code));
+                                if let Some(status) = status {
+                                    self.event_proxy.send_event(Event::ChildExit(status));
                                 }
                                 if self.drain_on_exit {
                                     let _ = self.pty_read(&mut state, &mut buf, pipe.as_mut());
@@ -289,14 +290,14 @@ where
                                         continue;
                                     }
 
-                                    error!("Error reading from PTY in event loop: {}", err);
+                                    error!("Error reading from PTY in event loop: {err}");
                                     break 'event_loop;
                                 }
                             }
 
                             if event.writable {
                                 if let Err(err) = self.pty_write(&mut state) {
-                                    error!("Error writing to PTY in event loop: {}", err);
+                                    error!("Error writing to PTY in event loop: {err}");
                                     break 'event_loop;
                                 }
                             }
@@ -338,7 +339,7 @@ impl event::Notify for Notifier {
     {
         let bytes = bytes.into();
         // Terminal hangs if we send 0 bytes through.
-        if bytes.len() == 0 {
+        if bytes.is_empty() {
             return;
         }
 
@@ -382,7 +383,7 @@ impl std::error::Error for EventLoopSendError {
 #[derive(Clone)]
 pub struct EventLoopSender {
     sender: Sender<Msg>,
-    poller: Arc<polling::Poller>,
+    poller: Arc<Poller>,
 }
 
 impl EventLoopSender {
