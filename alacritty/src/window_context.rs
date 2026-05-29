@@ -322,6 +322,9 @@ impl WindowContext {
         self.display.window.set_transparent(!opaque);
         self.display.window.set_blur(self.config.window.blur);
 
+        #[cfg(windows)]
+        self.display.window.set_backdrop(self.config.window.backdrop);
+
         // Update hint keys.
         self.display.hint_state.update_alphabet(self.config.hints.alphabet());
 

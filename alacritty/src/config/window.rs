@@ -48,6 +48,9 @@ pub struct WindowConfig {
     /// Request blur behind the window.
     pub blur: bool,
 
+    /// Windows backdrop (Mica/Acrylic).
+    pub backdrop: BackdropKind,
+
     /// Controls which `Option` key should be treated as `Alt`.
     option_as_alt: OptionAsAlt,
 
@@ -72,6 +75,7 @@ impl Default for WindowConfig {
         Self {
             dynamic_title: true,
             blur: Default::default(),
+            backdrop: Default::default(),
             embed: Default::default(),
             padding: Default::default(),
             opacity: Default::default(),
@@ -323,4 +327,14 @@ impl From<WindowLevel> for WinitWindowLevel {
             WindowLevel::AlwaysOnTop => WinitWindowLevel::AlwaysOnTop,
         }
     }
+}
+
+#[derive(ConfigDeserialize, Serialize, Default, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BackdropKind {
+    #[default]
+    Auto,
+    None,
+    Mica,
+    Acrylic,
+    AltMica
 }

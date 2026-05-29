@@ -43,6 +43,8 @@ use alacritty_terminal::index::Point;
 
 use crate::cli::WindowOptions;
 use crate::config::UiConfig;
+#[cfg(windows)]
+use crate::config::window::BackdropKind;
 use crate::config::window::{Decorations, Identity, WindowConfig};
 use crate::display::SizeInfo;
 
@@ -374,6 +376,19 @@ impl Window {
 
     pub fn set_blur(&self, blur: bool) {
         self.window.set_blur(blur);
+    }
+
+    #[cfg(windows)]
+    pub fn set_backdrop(&self, backdrop: BackdropKind) {
+        use winit::platform::windows::{BackdropType, WindowExtWindows};
+
+        self.window.set_system_backdrop(match backdrop {
+            BackdropKind::Auto => BackdropType::Auto,
+            BackdropKind::None => BackdropType::None,
+            BackdropKind::Mica => BackdropType::MainWindow,
+            BackdropKind::Acrylic => BackdropType::TransientWindow,
+            BackdropKind::AltMica => BackdropType::TabbedWindow,
+        });
     }
 
     pub fn set_maximized(&self, maximized: bool) {
