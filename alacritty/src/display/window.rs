@@ -185,6 +185,12 @@ impl Window {
             .with_fullscreen(config.window.fullscreen())
             .with_window_level(config.window.level.into());
 
+        #[cfg(windows)]
+        {
+            window_attributes =
+                window_attributes.with_system_backdrop(config.window.backdrop.into());
+        }
+
         let window = event_loop.create_window(window_attributes)?;
 
         // Text cursor.
@@ -380,15 +386,9 @@ impl Window {
 
     #[cfg(windows)]
     pub fn set_backdrop(&self, backdrop: BackdropKind) {
-        use winit::platform::windows::{BackdropType, WindowExtWindows};
+        use winit::platform::windows::WindowExtWindows;
 
-        self.window.set_system_backdrop(match backdrop {
-            BackdropKind::Auto => BackdropType::Auto,
-            BackdropKind::None => BackdropType::None,
-            BackdropKind::Mica => BackdropType::MainWindow,
-            BackdropKind::Acrylic => BackdropType::TransientWindow,
-            BackdropKind::AltMica => BackdropType::TabbedWindow,
-        });
+        self.window.set_system_backdrop(backdrop.into());
     }
 
     pub fn set_maximized(&self, maximized: bool) {

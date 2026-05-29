@@ -6,6 +6,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::OptionAsAlt as WinitOptionAsAlt;
+#[cfg(windows)]
+use winit::platform::windows::BackdropType;
 use winit::window::{Fullscreen, Theme as WinitTheme, WindowLevel as WinitWindowLevel};
 
 use alacritty_config_derive::{ConfigDeserialize, SerdeReplace};
@@ -337,4 +339,17 @@ pub enum BackdropKind {
     Mica,
     Acrylic,
     AltMica
+}
+
+#[cfg(windows)]
+impl From<BackdropKind> for BackdropType {
+    fn from(backdrop: BackdropKind) -> Self {
+        match backdrop {
+            BackdropKind::Auto => Self::Auto,
+            BackdropKind::None => Self::None,
+            BackdropKind::Mica => Self::MainWindow,
+            BackdropKind::Acrylic => Self::TransientWindow,
+            BackdropKind::AltMica => Self::TabbedWindow,
+        }
+    }
 }
