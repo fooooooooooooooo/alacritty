@@ -229,6 +229,26 @@ impl Renderer {
         self.draw_cells(size_info, glyph_cache, cells);
     }
 
+    /// Draw a string at pixel coordinates relative to the content area.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_string_at(
+        &mut self,
+        position: (f32, f32),
+        colors: (Rgb, Rgb),
+        string_chars: impl Iterator<Item = char>,
+        size_info: &SizeInfo,
+        glyph_cache: &mut GlyphCache,
+    ) {
+        match &mut self.text_renderer {
+            TextRendererProvider::Gles2(renderer) => {
+                renderer.draw_string_at(position, colors, string_chars, size_info, glyph_cache)
+            },
+            TextRendererProvider::Glsl3(renderer) => {
+                renderer.draw_string_at(position, colors, string_chars, size_info, glyph_cache)
+            },
+        }
+    }
+
     pub fn with_loader<F, T>(&mut self, func: F) -> T
     where
         F: FnOnce(LoaderApi<'_>) -> T,

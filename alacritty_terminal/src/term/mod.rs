@@ -444,6 +444,11 @@ impl<T> Term<T> {
         }
     }
 
+    #[inline]
+    pub fn title(&self) -> Option<&str> {
+        self.title.as_deref()
+    }
+
     /// Collect the information about the changes in the lines, which
     /// could be used to minimize the amount of drawing operations.
     ///

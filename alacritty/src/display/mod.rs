@@ -76,6 +76,9 @@ const BACKWARD_SEARCH_LABEL: &str = "Backward Search: ";
 /// The character used to shorten the visible text like uri preview or search regex.
 const SHORTENER: char = '…';
 
+/// Maximum tab width in terminal cells.
+const MAX_TAB_WIDTH_CELLS: usize = 32;
+
 /// Color which is used to highlight damaged rects when debugging.
 const DAMAGE_RECT_COLOR: Rgb = Rgb::new(255, 0, 255);
 
@@ -345,11 +348,36 @@ pub struct TabInfo {
     pub active_index: usize,
     /// Total number of tabs
     pub tab_count: usize,
+    /// Visible labels for each tab.
+    pub labels: Vec<String>,
 }
 
 impl TabInfo {
     pub fn should_draw(&self) -> bool {
         self.tab_count > 1
+    }
+
+    pub fn tab_width(&self, size_info: &SizeInfo<f32>) -> Option<f32> {
+        self.should_draw().then(|| {
+            let max_tab_width = size_info.cell_width() * MAX_TAB_WIDTH_CELLS as f32;
+            (size_info.width() / self.tab_count as f32).min(max_tab_width)
+        })
+    }
+
+    pub fn tab_at_position(&self, size_info: &SizeInfo<f32>, x: usize, y: usize) -> Option<usize> {
+        let tab_width = self.tab_width(size_info)?;
+        let tab_y = size_info.height() - size_info.padding_y() - size_info.cell_height();
+        let tab_height = size_info.cell_height();
+        let tab_bar_width = tab_width * self.tab_count as f32;
+        let x = x as f32;
+        let y = y as f32;
+
+        if x >= tab_bar_width || y < tab_y || y >= tab_y + tab_height {
+            return None;
+        }
+
+        let tab_index = (x / tab_width).floor() as usize;
+        (tab_index < self.tab_count).then_some(tab_index)
     }
 }
 
@@ -799,10 +827,10 @@ impl Display {
         let size_info = self.size_info;
 
         let tab_height = size_info.cell_height();
-        let tab_width = size_info.width() / (self.tab_info.tab_count - 1) as f32;
+        let tab_width = self.tab_info.tab_width(&size_info).unwrap();
         let mut x = 0.0;
-        // draw at bottom of the screen
-        let y = size_info.screen_lines() as f32 * size_info.cell_height() - size_info.padding_y();
+        // Draw at the bottom edge of the window, above the bottom padding.
+        let y = size_info.height() - size_info.padding_y() - tab_height;
 
         // Draw tab bar background first
         let bar_rect = RenderRect::new(
@@ -837,15 +865,25 @@ impl Display {
                 self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![rect]);
             }
 
-            // Draw tab number
-            let tab_text = (tab_idx + 1).to_string();
-            let point =
-                Point::new(size_info.total_lines(), Column((x / size_info.cell_width()) as usize));
-            self.renderer.draw_string(
-                point,
-                fg,
-                bg,
-                tab_text.chars(),
+            let total_columns = cmp::max(1, (tab_width / size_info.cell_width()).floor() as usize);
+            let text_offset = usize::from(total_columns > 2);
+            let text_columns = cmp::max(1, total_columns.saturating_sub(text_offset + 1));
+            let label = self
+                .tab_info
+                .labels
+                .get(tab_idx)
+                .map(|label| {
+                    StrShortener::new(label, text_columns, ShortenDirection::Right, Some(SHORTENER))
+                        .collect::<String>()
+                })
+                .filter(|label| !label.is_empty())
+                .unwrap_or_else(|| (tab_idx + 1).to_string());
+            let text_x = x + text_offset as f32 * size_info.cell_width();
+            let text_y = y - size_info.padding_y();
+            self.renderer.draw_string_at(
+                (text_x, text_y),
+                (fg, bg),
+                label.chars(),
                 &size_info,
                 &mut self.glyph_cache,
             );

@@ -1,9 +1,12 @@
 use bitflags::bitflags;
 use crossfont::{GlyphKey, RasterizedGlyph};
+use unicode_width::UnicodeWidthChar;
 
+use alacritty_terminal::index::{Column, Point};
 use alacritty_terminal::term::cell::Flags;
 
 use crate::display::SizeInfo;
+use crate::display::color::Rgb;
 use crate::display::content::RenderableCell;
 use crate::gl;
 use crate::gl::types::*;
@@ -68,6 +71,21 @@ pub trait TextRenderer<'a> {
         })
     }
 
+    /// Draw a string at pixel coordinates relative to the content area.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_string_at<'b: 'a>(
+        &'b mut self,
+        position: (f32, f32),
+        colors: (Rgb, Rgb),
+        string_chars: impl Iterator<Item = char>,
+        size_info: &'b SizeInfo,
+        glyph_cache: &'a mut GlyphCache,
+    ) {
+        self.with_api(size_info, |mut api| {
+            api.draw_string_at(position, colors, string_chars, glyph_cache, size_info);
+        })
+    }
+
     fn with_api<'b: 'a, F, T>(&'b mut self, size_info: &'b SizeInfo, func: F) -> T
     where
         F: FnOnce(Self::RenderApi) -> T;
@@ -105,7 +123,22 @@ pub trait TextRenderBatch {
     fn tex(&self) -> GLuint;
 
     /// Add item to the batch.
-    fn add_item(&mut self, cell: &RenderableCell, glyph: &Glyph, size_info: &SizeInfo);
+    #[inline]
+    fn add_item(&mut self, cell: &RenderableCell, glyph: &Glyph, size_info: &SizeInfo) {
+        let x = (cell.point.column.0 as f32 * size_info.cell_width()).round() as i16;
+        let y = (cell.point.line as f32 * size_info.cell_height()).round() as i16;
+        self.add_item_at_position(cell, glyph, x, y, size_info);
+    }
+
+    /// Add item to the batch at a pixel position relative to the content area.
+    fn add_item_at_position(
+        &mut self,
+        cell: &RenderableCell,
+        glyph: &Glyph,
+        x: i16,
+        y: i16,
+        size_info: &SizeInfo,
+    );
 }
 
 pub trait TextRenderApi<T: TextRenderBatch>: LoadGlyph {
@@ -126,6 +159,27 @@ pub trait TextRenderApi<T: TextRenderBatch>: LoadGlyph {
         self.batch().add_item(cell, glyph, size_info);
 
         // Render batch and clear if it's full.
+        if self.batch().full() {
+            self.render_batch();
+        }
+    }
+
+    /// Add item to the rendering queue at a pixel position relative to the content area.
+    #[inline]
+    fn add_render_item_at_position(
+        &mut self,
+        cell: &RenderableCell,
+        glyph: &Glyph,
+        x: i16,
+        y: i16,
+        size_info: &SizeInfo,
+    ) {
+        if !self.batch().is_empty() && self.batch().tex() != glyph.tex_id {
+            self.render_batch();
+        }
+
+        self.batch().add_item_at_position(cell, glyph, x, y, size_info);
+
         if self.batch().full() {
             self.render_batch();
         }
@@ -168,6 +222,61 @@ pub trait TextRenderApi<T: TextRenderBatch>: LoadGlyph {
                 let glyph = glyph_cache.get(glyph_key, self, false);
                 self.add_render_item(&cell, &glyph, size_info);
             }
+        }
+    }
+
+    /// Draw a string at pixel coordinates relative to the content area.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_string_at(
+        &mut self,
+        position: (f32, f32),
+        colors: (Rgb, Rgb),
+        string_chars: impl Iterator<Item = char>,
+        glyph_cache: &mut GlyphCache,
+        size_info: &SizeInfo,
+    ) {
+        let mut cursor_x = position.0.round() as i16;
+        let cursor_y = position.1.round() as i16;
+        let (fg, bg) = colors;
+
+        for character in string_chars {
+            let flags =
+                if character.width() == Some(2) { Flags::WIDE_CHAR } else { Flags::empty() };
+
+            let cell = RenderableCell {
+                point: Point::new(0, Column(0)),
+                character,
+                extra: None,
+                flags,
+                bg_alpha: 1.0,
+                fg,
+                bg,
+                underline: fg,
+            };
+
+            let font_key = match cell.flags & Flags::BOLD_ITALIC {
+                Flags::BOLD_ITALIC => glyph_cache.bold_italic_key,
+                Flags::ITALIC => glyph_cache.italic_key,
+                Flags::BOLD => glyph_cache.bold_key,
+                _ => glyph_cache.font_key,
+            };
+
+            let mut glyph_key = GlyphKey { font_key, size: glyph_cache.font_size, character };
+
+            let glyph = glyph_cache.get(glyph_key, self, true);
+            self.add_render_item_at_position(&cell, &glyph, cursor_x, cursor_y, size_info);
+
+            if let Some(zerowidth) = cell.extra.as_ref().and_then(|extra| extra.zerowidth.as_ref())
+            {
+                for character in zerowidth {
+                    glyph_key.character = *character;
+                    let glyph = glyph_cache.get(glyph_key, self, false);
+                    self.add_render_item_at_position(&cell, &glyph, cursor_x, cursor_y, size_info);
+                }
+            }
+
+            let occupied_cells = if flags.contains(Flags::WIDE_CHAR) { 2. } else { 1. };
+            cursor_x += (occupied_cells * size_info.cell_width()).round() as i16;
         }
     }
 }

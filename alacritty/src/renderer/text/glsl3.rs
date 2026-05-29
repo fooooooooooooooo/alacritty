@@ -107,8 +107,8 @@ impl Glsl3Renderer {
                 };
             }
 
-            // Coords.
-            add_attr!(2, gl::UNSIGNED_SHORT, u16);
+            // Cell position.
+            add_attr!(2, gl::SHORT, i16);
 
             // Glyph offset and size.
             add_attr!(4, gl::SHORT, i16);
@@ -282,9 +282,9 @@ impl Drop for RenderApi<'_> {
 #[derive(Debug)]
 #[repr(C)]
 struct InstanceData {
-    // Coords.
-    col: u16,
-    row: u16,
+    // Cell position relative to the content area.
+    x: i16,
+    y: i16,
 
     // Glyph offset.
     left: i16,
@@ -339,7 +339,14 @@ impl TextRenderBatch for Batch {
         self.len() == 0
     }
 
-    fn add_item(&mut self, cell: &RenderableCell, glyph: &Glyph, _: &SizeInfo) {
+    fn add_item_at_position(
+        &mut self,
+        cell: &RenderableCell,
+        glyph: &Glyph,
+        x: i16,
+        y: i16,
+        _: &SizeInfo,
+    ) {
         if self.is_empty() {
             self.tex = glyph.tex_id;
         }
@@ -349,8 +356,8 @@ impl TextRenderBatch for Batch {
         cell_flags.set(RenderingGlyphFlags::WIDE_CHAR, cell.flags.contains(Flags::WIDE_CHAR));
 
         self.instances.push(InstanceData {
-            col: cell.point.column.0 as u16,
-            row: cell.point.line as u16,
+            x,
+            y,
 
             top: glyph.top,
             left: glyph.left,

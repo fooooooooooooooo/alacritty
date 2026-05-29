@@ -396,6 +396,14 @@ impl ApplicationHandler<Event> for Processor {
                     }
                 }
             },
+            (EventType::CloseTab(index), window_id) => {
+                if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
+                    match index {
+                        Some(index) => window_context.close_tab(index),
+                        None => window_context.close_current_tab(),
+                    }
+                }
+            },
             (EventType::SelectNextTab, window_id) => {
                 if let Some(window_context) = window_id.and_then(|id| self.windows.get_mut(id)) {
                     window_context.switch_to_next_tab();
@@ -569,6 +577,7 @@ pub enum EventType {
     Scroll(Scroll),
     CreateWindow(WindowOptions),
     CreateTab(EventLoopProxy<Event>),
+    CloseTab(Option<usize>),
     SelectNextTab,
     SelectPreviousTab,
     SelectTab(usize),
@@ -928,25 +937,32 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
             .send_event(Event::new(EventType::CreateWindow(WindowOptions::default()), None));
     }
 
-    // create new tab
     fn create_new_tab(&mut self) {
-        println!("create new tab");
         let _ = self.event_proxy.send_event(Event::new(
             EventType::CreateTab(self.event_proxy.clone()),
             self.window().id(),
         ));
     }
 
+    fn close_tab(&mut self) {
+        let _ =
+            self.event_proxy.send_event(Event::new(EventType::CloseTab(None), self.window().id()));
+    }
+
+    fn close_tab_at(&mut self, index: usize) {
+        let _ = self
+            .event_proxy
+            .send_event(Event::new(EventType::CloseTab(Some(index)), self.window().id()));
+    }
+
     // select next tab
     fn select_next_tab(&mut self) {
-        println!("select next tab");
         let _ =
             self.event_proxy.send_event(Event::new(EventType::SelectNextTab, self.window().id()));
     }
 
     // select previous tab
     fn select_previous_tab(&mut self) {
-        println!("select previous tab");
         let _ = self
             .event_proxy
             .send_event(Event::new(EventType::SelectPreviousTab, self.window().id()));
@@ -954,7 +970,6 @@ impl<'a, N: Notify + 'a, T: EventListener> input::ActionContext<T> for ActionCon
 
     // select tab
     fn select_tab(&mut self, index: usize) {
-        println!("select tab {}", index);
         let _ = self
             .event_proxy
             .send_event(Event::new(EventType::SelectTab(index), self.window().id()));
@@ -1827,6 +1842,7 @@ pub struct Mouse {
     pub left_button_state: ElementState,
     pub middle_button_state: ElementState,
     pub right_button_state: ElementState,
+    pub tab_button: Option<MouseButton>,
     pub last_click_timestamp: Instant,
     pub last_click_button: MouseButton,
     pub click_state: ClickState,
@@ -1847,6 +1863,7 @@ impl Default for Mouse {
             left_button_state: ElementState::Released,
             middle_button_state: ElementState::Released,
             right_button_state: ElementState::Released,
+            tab_button: Default::default(),
             click_state: ClickState::None,
             cell_side: Side::Left,
             hint_highlight_dirty: Default::default(),
@@ -1924,11 +1941,13 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                 },
                 EventType::Terminal(event) => match event {
                     TerminalEvent::Title(title) => {
+                        *self.ctx.dirty = true;
                         if !self.ctx.preserve_title && self.ctx.config.window.dynamic_title {
                             self.ctx.window().set_title(title);
                         }
                     },
                     TerminalEvent::ResetTitle => {
+                        *self.ctx.dirty = true;
                         let window_config = &self.ctx.config.window;
                         if !self.ctx.preserve_title && window_config.dynamic_title {
                             self.ctx.display.window.set_title(window_config.identity.title.clone());
@@ -1992,6 +2011,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                 | EventType::ConfigReload(_)
                 | EventType::CreateWindow(_)
                 | EventType::CreateTab(_)
+                | EventType::CloseTab(_)
                 | EventType::SelectNextTab
                 | EventType::SelectPreviousTab
                 | EventType::SelectTab(_)

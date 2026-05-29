@@ -1,5 +1,5 @@
-// Cell properties.
-layout(location = 0) in vec2 gridCoords;
+// Cell position relative to the content area.
+layout(location = 0) in vec2 cellCoords;
 
 // Glyph properties.
 layout(location = 1) in vec4 glyph;
@@ -36,8 +36,8 @@ void main() {
     position.x = (gl_VertexID == 0 || gl_VertexID == 1) ? 1. : 0.;
     position.y = (gl_VertexID == 0 || gl_VertexID == 3) ? 0. : 1.;
 
-    // Position of cell from top-left
-    vec2 cellPosition = cellDim * gridCoords;
+    // Position of cell from top-left.
+    vec2 cellPosition = cellCoords;
 
     fg = vec4(textColor.rgb / 255.0, textColor.a);
     bg = backgroundColor / 255.0;

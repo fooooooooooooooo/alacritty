@@ -54,6 +54,12 @@ struct TerminalTab {
     shell_pid: u32,
 }
 
+impl TerminalTab {
+    fn title(&self, fallback: &str) -> String {
+        self.terminal.lock().title().unwrap_or(fallback).to_owned()
+    }
+}
+
 /// Event context for one individual Alacritty window.
 pub struct WindowContext {
     pub message_buffer: MessageBuffer,
@@ -76,6 +82,24 @@ pub struct WindowContext {
 }
 
 impl WindowContext {
+    fn update_tab_info(&mut self) {
+        let fallback_title = self.config.window.identity.title.as_str();
+
+        self.display.tab_info.active_index = self.active_tab_index;
+        self.display.tab_info.tab_count = self.tabs.len();
+        self.display.tab_info.labels =
+            self.tabs.iter().map(|tab| tab.title(fallback_title)).collect();
+    }
+
+    fn update_active_tab_title(&mut self) {
+        if self.preserve_title || !self.config.window.dynamic_title {
+            return;
+        }
+
+        let title = self.tabs[self.active_tab_index].title(&self.config.window.identity.title);
+        self.display.window.set_title(title);
+    }
+
     /// Create initial window context that does bootstrapping the graphics API we're going to use.
     pub fn initial(
         event_loop: &ActiveEventLoop,
@@ -238,7 +262,7 @@ impl WindowContext {
         }
 
         // Create context for the Alacritty window.
-        Ok(WindowContext {
+        let mut context = WindowContext {
             preserve_title,
             tabs: vec![TerminalTab {
                 terminal,
@@ -263,7 +287,10 @@ impl WindowContext {
             mouse: Default::default(),
             touch: Default::default(),
             dirty: Default::default(),
-        })
+        };
+        context.update_tab_info();
+
+        Ok(context)
     }
 
     /// Update the terminal window to the latest config.
@@ -383,6 +410,7 @@ impl WindowContext {
         }
 
         self.dirty = false;
+        self.update_tab_info();
 
         // Force the display to process any pending display update.
         self.display.process_renderer_update();
@@ -616,9 +644,8 @@ impl WindowContext {
         // Switch to the new tab
         self.active_tab_index = self.tabs.len() - 1;
 
-        // Update tab info
-        self.display.tab_info.active_index = self.active_tab_index;
-        self.display.tab_info.tab_count = self.tabs.len();
+        self.update_tab_info();
+        self.update_active_tab_title();
 
         self.display.pending_update.dirty = true;
         self.dirty = true;
@@ -626,12 +653,45 @@ impl WindowContext {
         Ok(())
     }
 
+    /// Close the currently active tab.
+    pub fn close_current_tab(&mut self) {
+        self.close_tab(self.active_tab_index);
+    }
+
+    /// Close a specific tab by index.
+    pub fn close_tab(&mut self, index: usize) {
+        if index >= self.tabs.len() {
+            return;
+        }
+
+        if self.tabs.len() <= 1 {
+            self.display.window.hold = false;
+            self.tabs[self.active_tab_index].terminal.lock().exit();
+            return;
+        }
+
+        let closed_tab = self.tabs.remove(index);
+        let _ = closed_tab.notifier.0.send(Msg::Shutdown);
+
+        if index < self.active_tab_index {
+            self.active_tab_index -= 1;
+        } else if self.active_tab_index >= self.tabs.len() {
+            self.active_tab_index = self.tabs.len() - 1;
+        }
+
+        self.update_tab_info();
+        self.update_active_tab_title();
+        self.display.pending_update.dirty = true;
+        self.dirty = true;
+    }
+
     /// Switch to a specific tab by index
     pub fn switch_to_tab(&mut self, index: usize) {
         if index < self.tabs.len() && index != self.active_tab_index {
             self.active_tab_index = index;
+            self.update_tab_info();
+            self.update_active_tab_title();
             self.display.pending_update.dirty = true;
-            self.display.tab_info.active_index = index;
             self.dirty = true;
         }
     }
@@ -640,7 +700,8 @@ impl WindowContext {
     pub fn switch_to_next_tab(&mut self) {
         if !self.tabs.is_empty() {
             self.active_tab_index = (self.active_tab_index + 1) % self.tabs.len();
-            self.display.tab_info.active_index = self.active_tab_index;
+            self.update_tab_info();
+            self.update_active_tab_title();
             self.display.pending_update.dirty = true;
             self.dirty = true;
         }
@@ -654,7 +715,8 @@ impl WindowContext {
             } else {
                 self.active_tab_index - 1
             };
-            self.display.tab_info.active_index = self.active_tab_index;
+            self.update_tab_info();
+            self.update_active_tab_title();
             self.display.pending_update.dirty = true;
             self.dirty = true;
         }

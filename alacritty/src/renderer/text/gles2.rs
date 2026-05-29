@@ -272,18 +272,21 @@ impl TextRenderBatch for Batch {
         self.len() == 0
     }
 
-    fn add_item(&mut self, cell: &RenderableCell, glyph: &Glyph, size_info: &SizeInfo) {
+    fn add_item_at_position(
+        &mut self,
+        cell: &RenderableCell,
+        glyph: &Glyph,
+        x: i16,
+        y: i16,
+        size_info: &SizeInfo,
+    ) {
         if self.is_empty() {
             self.tex = glyph.tex_id;
         }
 
-        // Calculate the cell position.
-        let x = cell.point.column.0 as i16 * size_info.cell_width() as i16;
-        let y = cell.point.line as i16 * size_info.cell_height() as i16;
-
         // Calculate the glyph position.
-        let glyph_x = cell.point.column.0 as i16 * size_info.cell_width() as i16 + glyph.left;
-        let glyph_y = (cell.point.line + 1) as i16 * size_info.cell_height() as i16 - glyph.top;
+        let glyph_x = x + glyph.left;
+        let glyph_y = y + size_info.cell_height() as i16 - glyph.top;
 
         let colored = if glyph.multicolor {
             RenderingGlyphFlags::COLORED

@@ -104,6 +104,8 @@ pub trait ActionContext<T: EventListener> {
     #[cfg(not(target_os = "macos"))]
     fn create_new_window(&mut self) {}
     fn create_new_tab(&mut self) {}
+    fn close_tab(&mut self) {}
+    fn close_tab_at(&mut self, _index: usize) {}
     fn select_next_tab(&mut self) {}
     fn select_previous_tab(&mut self) {}
     fn select_tab(&mut self, _index: usize) {}
@@ -445,6 +447,7 @@ impl<T: EventListener> Execute<T> for Action {
             #[cfg(target_os = "macos")]
             Action::SelectLastTab => ctx.window().select_last_tab(),
             Action::CreateNewTab => ctx.create_new_tab(),
+            Action::CloseTab => ctx.close_tab(),
             Action::SelectNextTab => ctx.select_next_tab(),
             Action::SelectPreviousTab => ctx.select_previous_tab(),
             Action::SelectTab1 => ctx.select_tab(0),
@@ -1010,6 +1013,31 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
             _ => (),
         }
 
+        if state == ElementState::Released && self.ctx.mouse().tab_button == Some(button) {
+            self.ctx.mouse_mut().tab_button = None;
+            return;
+        }
+
+        if state == ElementState::Pressed {
+            if let Some(tab_index) = self.tab_bar_tab_at_cursor() {
+                self.ctx.clear_selection();
+
+                match button {
+                    MouseButton::Left => {
+                        self.ctx.mouse_mut().tab_button = Some(button);
+                        self.ctx.select_tab(tab_index);
+                        return;
+                    },
+                    MouseButton::Middle => {
+                        self.ctx.mouse_mut().tab_button = Some(button);
+                        self.ctx.close_tab_at(tab_index);
+                        return;
+                    },
+                    _ => (),
+                }
+            }
+        }
+
         // Skip normal mouse events if the message bar has been clicked.
         if self.message_bar_cursor_state() == Some(CursorIcon::Pointer)
             && state == ElementState::Pressed
@@ -1109,6 +1137,15 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
         }
     }
 
+    fn tab_bar_tab_at_cursor(&mut self) -> Option<usize> {
+        let size = self.ctx.size_info();
+        let (x, y) = {
+            let mouse = self.ctx.mouse();
+            (mouse.x, mouse.y)
+        };
+        self.ctx.display().tab_info.tab_at_position(&size, x, y)
+    }
+
     /// Icon state of the cursor.
     fn cursor_state(&mut self) -> CursorIcon {
         let display_offset = self.ctx.terminal().grid().display_offset();
@@ -1120,7 +1157,9 @@ impl<T: EventListener, A: ActionContext<T>> Processor<T, A> {
 
         if let Some(mouse_state) = self.message_bar_cursor_state() {
             mouse_state
-        } else if self.ctx.display().highlighted_hint.as_ref().is_some_and(hint_highlighted) {
+        } else if self.tab_bar_tab_at_cursor().is_some()
+            || self.ctx.display().highlighted_hint.as_ref().is_some_and(hint_highlighted)
+        {
             CursorIcon::Pointer
         } else if !self.ctx.modifiers().state().shift_key() && self.ctx.mouse_mode() {
             CursorIcon::Default
