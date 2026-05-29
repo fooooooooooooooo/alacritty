@@ -29,7 +29,6 @@ pub struct DamageTracker {
 
 impl DamageTracker {
     pub fn new(screen_lines: usize, columns: usize) -> Self {
-        println!("DamageTracker::new");
         let mut tracker = Self {
             columns,
             screen_lines,
