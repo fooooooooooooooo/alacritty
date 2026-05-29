@@ -436,7 +436,7 @@ impl ApplicationHandler<Event> for Processor {
                     );
                 }
             },
-            (EventType::Terminal(TerminalEvent::Wakeup), Some(window_id)) => {
+            (EventType::Terminal { event: TerminalEvent::Wakeup, .. }, Some(window_id)) => {
                 if let Some(window_context) = self.windows.get_mut(window_id) {
                     window_context.dirty = true;
                     if window_context.display.window.has_frame {
@@ -444,7 +444,13 @@ impl ApplicationHandler<Event> for Processor {
                     }
                 }
             },
-            (EventType::Terminal(TerminalEvent::Exit), Some(window_id)) => {
+            (EventType::Terminal { tab_id, event: TerminalEvent::Exit }, Some(window_id)) => {
+                if let Some(window_context) = self.windows.get_mut(window_id) {
+                    if window_context.handle_terminal_exit(tab_id) {
+                        return;
+                    }
+                }
+
                 // Remove the closed terminal.
                 let window_context = match self.windows.entry(*window_id) {
                     // Don't exit when terminal exits if user asked to hold the window.
@@ -571,7 +577,10 @@ impl From<Event> for WinitEvent<Event> {
 /// Alacritty events.
 #[derive(Debug, Clone)]
 pub enum EventType {
-    Terminal(TerminalEvent),
+    Terminal {
+        tab_id: Option<usize>,
+        event: TerminalEvent,
+    },
     ConfigReload(PathBuf),
     Message(Message),
     Scroll(Scroll),
@@ -595,7 +604,7 @@ pub enum EventType {
 
 impl From<TerminalEvent> for EventType {
     fn from(event: TerminalEvent) -> Self {
-        Self::Terminal(event)
+        Self::Terminal { tab_id: None, event }
     }
 }
 
@@ -1939,7 +1948,7 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
                     self.ctx.message_buffer.push(message);
                     self.ctx.display.pending_update.dirty = true;
                 },
-                EventType::Terminal(event) => match event {
+                EventType::Terminal { event, .. } => match event {
                     TerminalEvent::Title(title) => {
                         *self.ctx.dirty = true;
                         if !self.ctx.preserve_title && self.ctx.config.window.dynamic_title {
@@ -2155,11 +2164,17 @@ impl input::Processor<EventProxy, ActionContext<'_, Notifier, EventProxy>> {
 pub struct EventProxy {
     proxy: EventLoopProxy<Event>,
     window_id: WindowId,
+    tab_id: Option<usize>,
 }
 
 impl EventProxy {
     pub fn new(proxy: EventLoopProxy<Event>, window_id: WindowId) -> Self {
-        Self { proxy, window_id }
+        Self { proxy, window_id, tab_id: None }
+    }
+
+    pub fn with_tab_id(mut self, tab_id: usize) -> Self {
+        self.tab_id = Some(tab_id);
+        self
     }
 
     /// Send an event to the event loop.
@@ -2170,6 +2185,7 @@ impl EventProxy {
 
 impl EventListener for EventProxy {
     fn send_event(&self, event: TerminalEvent) {
-        let _ = self.proxy.send_event(Event::new(event.into(), self.window_id));
+        let event = EventType::Terminal { tab_id: self.tab_id, event };
+        let _ = self.proxy.send_event(Event::new(event, self.window_id));
     }
 }

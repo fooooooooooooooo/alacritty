@@ -338,7 +338,7 @@ pub enum BackdropKind {
     None,
     Mica,
     Acrylic,
-    AltMica
+    AltMica,
 }
 
 #[cfg(windows)]

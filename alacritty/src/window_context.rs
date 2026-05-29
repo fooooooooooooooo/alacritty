@@ -46,6 +46,7 @@ use crate::{input, renderer};
 
 /// A terminal tab containing a terminal instance and its associated state
 struct TerminalTab {
+    id: usize,
     terminal: Arc<FairMutex<Term<EventProxy>>>,
     notifier: Notifier,
     #[cfg(not(windows))]
@@ -67,6 +68,7 @@ pub struct WindowContext {
     pub dirty: bool,
     event_queue: Vec<WinitEvent<Event>>,
     tabs: Vec<TerminalTab>,
+    next_tab_id: usize,
     active_tab_index: usize,
     cursor_blink_timed_out: bool,
     prev_bell_cmd: Option<Instant>,
@@ -82,6 +84,12 @@ pub struct WindowContext {
 }
 
 impl WindowContext {
+    fn next_tab_id(&mut self) -> usize {
+        let tab_id = self.next_tab_id;
+        self.next_tab_id += 1;
+        tab_id
+    }
+
     fn update_tab_info(&mut self) {
         let fallback_title = self.config.window.identity.title.as_str();
 
@@ -213,7 +221,8 @@ impl WindowContext {
             display.size_info.columns()
         );
 
-        let event_proxy = EventProxy::new(proxy, display.window.id());
+        let first_tab_id = 0;
+        let event_proxy = EventProxy::new(proxy, display.window.id()).with_tab_id(first_tab_id);
 
         // Create the terminal.
         //
@@ -265,6 +274,7 @@ impl WindowContext {
         let mut context = WindowContext {
             preserve_title,
             tabs: vec![TerminalTab {
+                id: first_tab_id,
                 terminal,
                 notifier: Notifier(loop_tx),
                 #[cfg(not(windows))]
@@ -272,6 +282,7 @@ impl WindowContext {
                 #[cfg(not(windows))]
                 shell_pid,
             }],
+            next_tab_id: first_tab_id + 1,
             active_tab_index: 0,
             display,
             config,
@@ -606,7 +617,9 @@ impl WindowContext {
         &mut self,
         event_loop_proxy: &EventLoopProxy<Event>,
     ) -> Result<(), Box<dyn Error>> {
-        let event_proxy = EventProxy::new(event_loop_proxy.clone(), self.display.window.id());
+        let tab_id = self.next_tab_id();
+        let event_proxy =
+            EventProxy::new(event_loop_proxy.clone(), self.display.window.id()).with_tab_id(tab_id);
 
         // Create a new terminal instance
         let terminal =
@@ -633,6 +646,7 @@ impl WindowContext {
 
         // Add the new tab
         self.tabs.push(TerminalTab {
+            id: tab_id,
             terminal,
             notifier: Notifier(loop_tx),
             #[cfg(not(windows))]
@@ -683,6 +697,24 @@ impl WindowContext {
         self.update_active_tab_title();
         self.display.pending_update.dirty = true;
         self.dirty = true;
+    }
+
+    pub fn handle_terminal_exit(&mut self, tab_id: Option<usize>) -> bool {
+        let Some(tab_id) = tab_id else {
+            return false;
+        };
+
+        if self.tabs.len() <= 1 {
+            return false;
+        }
+
+        let Some(index) = self.tabs.iter().position(|tab| tab.id == tab_id) else {
+            // Ignore delayed exit notifications from tabs which were already removed.
+            return true;
+        };
+
+        self.close_tab(index);
+        true
     }
 
     /// Switch to a specific tab by index
