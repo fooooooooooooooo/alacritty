@@ -77,12 +77,13 @@ pub trait TextRenderer<'a> {
         &'b mut self,
         position: (f32, f32),
         colors: (Rgb, Rgb),
+        bg_alpha: f32,
         string_chars: impl Iterator<Item = char>,
         size_info: &'b SizeInfo,
         glyph_cache: &'a mut GlyphCache,
     ) {
         self.with_api(size_info, |mut api| {
-            api.draw_string_at(position, colors, string_chars, glyph_cache, size_info);
+            api.draw_string_at(position, colors, bg_alpha, string_chars, glyph_cache, size_info);
         })
     }
 
@@ -231,6 +232,7 @@ pub trait TextRenderApi<T: TextRenderBatch>: LoadGlyph {
         &mut self,
         position: (f32, f32),
         colors: (Rgb, Rgb),
+        bg_alpha: f32,
         string_chars: impl Iterator<Item = char>,
         glyph_cache: &mut GlyphCache,
         size_info: &SizeInfo,
@@ -248,7 +250,7 @@ pub trait TextRenderApi<T: TextRenderBatch>: LoadGlyph {
                 character,
                 extra: None,
                 flags,
-                bg_alpha: 1.0,
+                bg_alpha,
                 fg,
                 bg,
                 underline: fg,

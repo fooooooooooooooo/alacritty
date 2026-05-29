@@ -235,17 +235,28 @@ impl Renderer {
         &mut self,
         position: (f32, f32),
         colors: (Rgb, Rgb),
+        bg_alpha: f32,
         string_chars: impl Iterator<Item = char>,
         size_info: &SizeInfo,
         glyph_cache: &mut GlyphCache,
     ) {
         match &mut self.text_renderer {
-            TextRendererProvider::Gles2(renderer) => {
-                renderer.draw_string_at(position, colors, string_chars, size_info, glyph_cache)
-            },
-            TextRendererProvider::Glsl3(renderer) => {
-                renderer.draw_string_at(position, colors, string_chars, size_info, glyph_cache)
-            },
+            TextRendererProvider::Gles2(renderer) => renderer.draw_string_at(
+                position,
+                colors,
+                bg_alpha,
+                string_chars,
+                size_info,
+                glyph_cache,
+            ),
+            TextRendererProvider::Glsl3(renderer) => renderer.draw_string_at(
+                position,
+                colors,
+                bg_alpha,
+                string_chars,
+                size_info,
+                glyph_cache,
+            ),
         }
     }
 

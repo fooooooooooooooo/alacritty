@@ -367,7 +367,7 @@ impl TabInfo {
     pub fn tab_at_position(&self, size_info: &SizeInfo<f32>, x: usize, y: usize) -> Option<usize> {
         let tab_width = self.tab_width(size_info)?;
         let tab_y = size_info.height() - size_info.padding_y() - size_info.cell_height();
-        let tab_height = size_info.cell_height();
+        let tab_height = size_info.cell_height() + size_info.padding_y();
         let tab_bar_width = tab_width * self.tab_count as f32;
         let x = x as f32;
         let y = y as f32;
@@ -825,21 +825,23 @@ impl Display {
         }
 
         let size_info = self.size_info;
+        let opacity = config.window_opacity();
 
         let tab_height = size_info.cell_height();
         let tab_width = self.tab_info.tab_width(&size_info).unwrap();
         let mut x = 0.0;
         // Draw at the bottom edge of the window, above the bottom padding.
         let y = size_info.height() - size_info.padding_y() - tab_height;
+        let bar_height = tab_height + size_info.padding_y();
 
         // Draw tab bar background first
         let bar_rect = RenderRect::new(
             0.0,
             y,
             size_info.width(),
-            tab_height,
+            bar_height,
             config.colors.tab_bar.background,
-            1.0,
+            opacity,
         );
 
         self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![bar_rect]);
@@ -861,7 +863,7 @@ impl Display {
 
             // Draw active tab background
             if is_active {
-                let rect = RenderRect::new(x, y, tab_width, tab_height, bg, 1.0);
+                let rect = RenderRect::new(x, y, tab_width, bar_height, bg, opacity);
                 self.renderer.draw_rects(&size_info, &self.glyph_cache.font_metrics(), vec![rect]);
             }
 
@@ -883,6 +885,7 @@ impl Display {
             self.renderer.draw_string_at(
                 (text_x, text_y),
                 (fg, bg),
+                0.0,
                 label.chars(),
                 &size_info,
                 &mut self.glyph_cache,
